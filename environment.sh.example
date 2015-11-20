@@ -1,0 +1,5 @@
+export APP_SETTINGS="app_settings.py"
+
+export DB_PATH="postgresql://db_host/db_name"
+export DB_USER="db_user"
+export DB_PASS="db_password"
