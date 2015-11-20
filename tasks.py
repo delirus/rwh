@@ -1,5 +1,9 @@
 import os
-from invoke import run, task
+from invoke import run, task, Collection
+
+namespace = Collection()
+
+server = Collection('server')
 
 @task(help={'pid_file':  'PID file for gunicorn server',
             'conf_file': 'gunicorn configuration'})
@@ -15,6 +19,8 @@ def start_server(pidfile=os.environ['GUNICORN_PID'],
         gunicorn_cmd  = "gunicorn -D -p %s -c %s rwh:app" % (pidfile, config)
         run(gunicorn_cmd)
 
+server.add_task(start_server, name='start')
+
 @task(help={'pid_file': 'PID file of the running gunicorn server'})
 def restart_server(pidfile=os.environ['GUNICORN_PID']):
     """
@@ -27,6 +33,8 @@ def restart_server(pidfile=os.environ['GUNICORN_PID']):
     else:
         print("Could not find gunicorn PID file. Is server running?")
 
+server.add_task(restart_server, name='restart')
+
 @task(help={'pid_file': 'PID file of the running gunicorn server'})
 def stop_server(pidfile=os.environ['GUNICORN_PID']):
     """
@@ -38,3 +46,9 @@ def stop_server(pidfile=os.environ['GUNICORN_PID']):
         run(restart_cmd)
     else:
         print("Could not find gunicorn PID file. Is server running?")
+
+server.add_task(stop_server, name='stop')
+
+namespace.add_collection(server)
+
+

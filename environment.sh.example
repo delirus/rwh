@@ -8,4 +8,4 @@ export GUNICORN_LOGS="log"
 export GUNICORN_PID="gunicorn.pid"
 export GUNICORN_CONF="gunicorn.conf"
 
-export RWH_DATA="datadir"
+export RWH_DATA="data"
