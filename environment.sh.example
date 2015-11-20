@@ -4,5 +4,8 @@ export DB_PATH="postgresql://db_host/db_name"
 export DB_USER="db_user"
 export DB_PASS="db_password"
 
+export GUNICORN_LOGS="log"
 export GUNICORN_PID="gunicorn.pid"
 export GUNICORN_CONF="gunicorn.conf"
+
+export RWH_DATA="datadir"
