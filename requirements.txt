@@ -9,3 +9,4 @@ itsdangerous==0.24
 paramiko==1.16.0
 psycopg2==2.6.1
 pycrypto==2.6.1
+setproctitle==1.1.9
