@@ -1,6 +1,7 @@
 export APP_SETTINGS="app_config.Production"
 
 export APP_ID="reddit_app_id"
+export APP_VERSION=$(git log | head -n1)
 
 export DB_HOST="db_host"
 export DB_NAME="db_name"
