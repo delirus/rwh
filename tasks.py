@@ -16,7 +16,7 @@ def start_server(pidfile=os.environ['GUNICORN_PID'],
         print("A PID file for running server was found at %s.\nIf server is not running, remove the stale PID file and try again." % pidfile)
     else:
         print("Starting gunicorn server... ")
-        gunicorn_cmd  = "gunicorn -D -p %s -c %s rwh:app" % (pidfile, config)
+        gunicorn_cmd  = "gunicorn -D -p %s -c %s app:rwh" % (pidfile, config)
         run(gunicorn_cmd)
 
 server.add_task(start_server, name='start')
