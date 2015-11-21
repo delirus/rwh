@@ -5,14 +5,16 @@ from datetime.datetime import utcnow as utcnow
 from urllib.parse import urlencode
 from urllib.request import Request as client_http_request
 from urllib.request import HTTPBasicAuthHandler() as http_basic_auth_handler
-from urllib.request import build_opener, install_opener, urlopen
+from urllib.request import build_opener
 from flask import Blueprint, request, render_template, redirect, session, url_for, jsonify
 
 from app import db, rwh
 
 from app.login.models import LoginSession
 
+
 login = Blueprint('authentication', __name__, url_prefix='/authentication')
+
 
 def get_login_session():
     login_session = None
@@ -20,6 +22,7 @@ def get_login_session():
     if session_id:
         login_session = LoginSession.query.filer_by(id=session_id).first()
     return login_session, session_id
+
 
 def authenticated(call):
     def authenticated_call():
@@ -29,6 +32,26 @@ def authenticated(call):
         else:
             redirect(url_for('authentication.login'))
     return authenticated_call
+
+
+def token_request(uri, post_data):
+    request_data = urlencode(post_data).encode('utf-8')
+
+    request = client_http_request(uri, method='POST', data=request_data)
+    request.add_header('Content-Type', 'application/x-www-form-urlencoded')
+    request.add_header('User-Agent', rwh.config.app_user_agent)
+
+    authenticator = http_basic_auth_handler()
+    authenticator.add_password(uri=uri, user=rwh.config.app_id, password='')
+    authenticated_opener = build_opener(authenticator)
+
+    request_result = authenticated_opener.open(refresh_request)
+
+    status_code = request_result.getcode()
+    result_data = json.load(request_result)
+
+    return result_data, status_code
+    
 
 @login.route('/login', strict_slashes=False)
 def reddit_login():
@@ -47,35 +70,24 @@ def reddit_login():
         app_id = rwh.config.app_id
         redirect("https://www.reddit.com/api/v1/authorize?client_id=%s&response_type=code&state=%s&redirect_uri=https://aoiy.eu/rwh/authentication/login&duration=permanent&scope=identity,submit,edit" % (app_id, session_id))
 
+
 def refresh_token(login_session):
     refresh_uri = 'https://www.reddit.com/api/v1/access_token'
     refresh_data = urlencode({
       'grant_type': 'refresh_token',
       'refresh_token': login_session.refresh_token
     }).encode('utf-8')
-    refresh_request = client_http_request(refresh_uri,
-                                          method='POST',
-                                          data=refresh_data)
-    refresh_request.add_header('User-Agent', rwh.config.app_user_agent)
-    refresh_request.add_header('Content-Type', 'application/x-www-form-urlencoded')
-    authenticator = http_basic_auth_handler()
-    authenticator.add_password(
-      uri=refresh_uri,
-      user=rwh.config.app_id,
-      password=''
-    )
-    authenticated_opener = build_opener(authenticator)
-    install_opener(authenticated_opener)
-    refresh_result = urlopen(refresh_request)
-    refresh_code   = refresh_result.getcode()
+
+    refresh_result_data, status_code = token_request(refresh_uri, refresh_data)
+
     refresh_token  = None
-    if (result_code == 200):
-        refresh_result_data = json.load(refresh_result)
-        login_session.token = refresh_result_data.access_token
-        login_session.token_expires = utc(refresh_result_data.expires_in)
-        login_session.refresh_token = refresh_result_data.refresh_token
+    if (status_code == 200):
+        login_session.token = refresh_result_data.get('access_token')
+        login_session.token_expires = utc(refresh_result_data.get('expires_in'))
+        login_session.refresh_token = refresh_result_data.get('refresh_token')
         refresh_token = login_session.token
-    return refresh_token, refresh_code
+    return refresh_token, status_code
+
 
 @login.route('/active', strict_slashes=False)
 def active():
