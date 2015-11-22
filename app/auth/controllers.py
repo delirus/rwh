@@ -12,14 +12,14 @@ from flask import Blueprint, request, render_template, redirect, session, url_fo
 
 from app import db, rwh
 
-from app.authentication.models import LoginSession
+from app.auth.models import LoginSession
 
 
 """
 The blueprint for hadling URL's under the /authenticatin/* path.
 These paths are to be used for signing in and maintaing active users.
 """
-login = Blueprint('authentication', __name__, url_prefix='/authentication')
+auth_blueprint = Blueprint('auth', __name__, url_prefix='/auth')
 
 
 def get_login_session():
@@ -36,21 +36,26 @@ def get_login_session():
 
 def authenticated(call):
     """
-    This function is to be used as decorator for Flask calls
-    that are only allowed for authenticated users.
-    e.g. if the route is defined as
+    This function is to be used as decorator for Flask routes
+    that are only allowed to be accessed by authenticated users.
+
+    e.g. route /private_path defined as
     @authenticated
-    @route("/stories")
-    def stories(...)
-    then the route /stories can be accessed only by authenticated users.
-    Non-authenticated user will be redirected to the /authentication/login URL.
+    @route("/private_path")
+    def private_path(...):
+      ...
+    will be accessible only to the authenticated users.
+    Non-authenticated user will be redirected to the /auth/login URL
+    and redirect_url cookie will be set for them to come back after login.
     """
     def authenticated_call():
         login_session, session_id = get_login_session()
         if login_session and (login_session.status == LoginSession.status_open):
             call()
         else:
-            return redirect(url_for('authentication.reddit_login'))
+            login_redirect_response = redirect(url_for('auth.reddit_login'))
+            login_redirect_response.set_cookie('redirect_url', request.url)
+            return login_redirect_response
     return authenticated_call
 
 
@@ -131,17 +136,30 @@ def reddit_login():
                 db.session.commit()
 
                 session.pop('session_id')
-                session.pop('session_expires')
-                return jsonify({'error': error}), 401
+
+                authorization_failed_response = render_template('auth/login_error.html')
+                authorization_failed_response.set_cookie('session_expires', int(utcnow().strftime('%s')), expires=0)
+                authorization_failed_response.status_code = 401
+
+                flash(error)
+                return authorization_failed_response
 
             if (state == session_id):
                 status_code = obtain_token(login_session, code)
+
                 if (status_code == 200):
                     login_session.status = LoginSession.status_active
                     db.session.add(login_session)
                     db.session.commit()
 
-                    login_redirect_response = redirect(url_for('authentication.active'))
+                    default_redirect_url = request.url_root
+                    given_redirect_url   = request.cookies.get('redirect_url')
+                    if given_redirect_url:
+                        login_redirect_response = redirect(given_redirect_url))
+                        login_redirect_response.set_cookie('redirect_url', expires=0)
+                    else:
+                        login_redirect_response = redirect(default_redirect_url))
+
                     session['session_id'] = session_id
 
                     expires = utcnow() + timedelta(minutes=rwh.config['SESSION_DURATION'])
@@ -155,21 +173,23 @@ def reddit_login():
 
                     session.pop('session_id')
                     
-                    initiation_failed_response = jsonify({'error': 'could not get bearer token'})
-                    initiation_failed_response.set_cookie('session_expires', int(utcnow().strftime('%s')))
+                    initiation_failed_response = render_template('auth/login_failed.html')
+                    initiation_failed_response.set_cookie('session_expires', int(utcnow().strftime('%s')), expires=0)
                     initiation_failed_response.status_code = status_code
 
+                    flash('could not obtain bearer token from OAuth2 server')
                     return initiation_failed_response
             else:
                 session.pop('session_id')
 
-                session_not_found_response = jsonify({'error': 'no such session started'})
-                session_not_found_response.set_cookie('session_expires', int(utcnow().strftime('%s')))
+                session_not_found_response = render_template('auth/login_failed.html')
+                session_not_found_response.set_cookie('session_expires', int(utcnow().strftime('%s')), expires=0)
                 session_not_found_response.status_code = 404
                 
+                flash('no session with this ID has been initiated recently')
                 return session_not_found_response
         if (login_session.status == LoginSession.status_active):
-            return redirect(url_for('authentication.active'))
+            return redirect(url_for('auth.active'))
     else:
         session_id = str(uuid.uuid4())
         login_session = LoginSession(session_id) # default status='initiating'
@@ -237,7 +257,9 @@ def active():
             refresh_failed_response.status_code = status_code
             return refresh_failed_response
     else:
-        return redirect(url_for('authentication.reddit_login'))
+        unauthenticated_response = jsonify({'error': 'user not authenticated'})
+        unauthenticated_response.status_code = 422
+        return unauthenticated_response
 
 
 def revoke_token(login_session):

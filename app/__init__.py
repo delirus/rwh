@@ -13,8 +13,8 @@ db = SQLAlchemy(rwh)
 def not_found(error):
     return render_template("404.html"), 404
 
-from app.authentication.controllers import login
-rwh.register_blueprint(login)
+from app.auth.controllers import auth_blueprint
+rwh.register_blueprint(auth_blueprint)
 
 
 if __name__ == '__main__':
