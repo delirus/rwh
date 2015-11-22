@@ -13,10 +13,18 @@ from app import db, rwh
 from app.login.models import LoginSession
 
 
+"""
+The blueprint for hadling URL's under the /authenticatin/* path.
+These paths are to be used for signing in and maintaing active users.
+"""
 login = Blueprint('authentication', __name__, url_prefix='/authentication')
 
 
 def get_login_session():
+    """
+    Retrieves the "session_id" and "LoginSession" object that correspond
+    to the values from the client cookies (safely encrypted by Flask).
+    """
     login_session = None
     session_id    = session.get('session_id')
     if session_id:
@@ -25,16 +33,34 @@ def get_login_session():
 
 
 def authenticated(call):
+    """
+    This function is to be used as decorator for Flask calls
+    that are only allowed for authenticated users.
+    e.g. if the route is defined as
+    @authenticated
+    @route("/stories")
+    def stories(...)
+    then the route /stories can be accessed only by authenticated users.
+    Non-authenticated user will be redirected to the /authentication/login URL.
+    """
     def authenticated_call():
         login_session, session_id = get_login_session()
         if login_session and (login_session.status == LoginSession.status_open):
             call()
         else:
-            redirect(url_for('authentication.login'))
+            return redirect(url_for('authentication.login'))
     return authenticated_call
 
 
 def token_request(uri, post_data):
+    """
+    This function encapsulates the code used to make the request
+    to the (reddit) OAuth2 endpoint that is shared between
+    obtaining the first, refreshing and revoking the token.
+
+    The parameters are the endpoint URI and dictionary with the post data
+    to be JSONified and sent with the POST request to the URI.
+    """
     request_data = urlencode(post_data).encode('utf-8')
 
     request = client_http_request(uri, method='POST', data=request_data)
@@ -48,19 +74,60 @@ def token_request(uri, post_data):
     request_result = authenticated_opener.open(refresh_request)
 
     status_code = request_result.getcode()
-    result_data = json.load(request_result)
+    if request_result:
+        result_data = json.load(request_result)
+    else:
+        resutl_data = None
 
     return result_data, status_code
     
+
+def obtain_token(login_session, authorization_code):
+    authorization_uri  = 'https://www.reddit.com/api/v1/access_token'
+    authorization_data = urlencode({
+      'grant_type': 'authorization_code',
+      'code':       authorization_code,
+      'state':      login_session.id
+    }).encode('utf-8')
+
+    authorization_data, status_code = token_request(authorization_uri,
+                                                    authorization_data)
+
+    if (status_code == 200):
+        token         = authorization_data.get('access_token')
+        expiration    = authorization_data.get('expires_in')
+        refresh_token = authorization_data.get('refresh_token')
+
+        login_session.status        = LoginSession.status_open
+        login_session.token         = token
+        login_session.token_expires = utc(expiration)
+        login_session.refresh_token = refresh_token
+
+        return token, expires, 200
+    else:
+        return None, None, status_code
+
 
 @login.route('/login', strict_slashes=False)
 def reddit_login():
     login_session, session_id = get_login_session()
     if login_session:
         if (login_session.status == LoginSession.status_initiating):
-            # TODO parse parameters, retrieve token and save in login session
+            code  = request.args.get('code')
+            state = request.args.get('state')
+            if (state == session_id):
+                token, expires, status_code = obtain_token(login_session, code)
+                if (satus_code == 200):
+                    db.session.add(login_session)
+                    db.session.commit()
+                    expires = int(login_session.token_expires.strftime('%s'))
+                    return jsonify({'token': token, 'expires': expires}), 200
+                else:
+                    return None, status_code
+            else:
+                return None, 440
         if (login_session.status == LoginSession.status_open):
-            redirect(url_for('authentication.active'))
+            return redirect(url_for('authentication.active'))
     else:
         session_id = str(uuid.uuid4())
         session['session_id'] = session_id
@@ -68,7 +135,7 @@ def reddit_login():
         db.session.add(login_session)
         db.session.commit()
         app_id = rwh.config.app_id
-        redirect("https://www.reddit.com/api/v1/authorize?client_id=%s&response_type=code&state=%s&redirect_uri=https://aoiy.eu/rwh/authentication/login&duration=permanent&scope=identity,submit,edit" % (app_id, session_id))
+        return redirect("https://www.reddit.com/api/v1/authorize?client_id=%s&response_type=code&state=%s&redirect_uri=https://aoiy.eu/rwh/authentication/login&duration=permanent&scope=identity,submit,edit" % (app_id, session_id))
 
 
 def refresh_token(login_session):
@@ -103,12 +170,24 @@ def active():
         if (status_code == 200):
             db.session.add(login_session)
             db.session.commit()
-            expration = int(login_session.token_expires.strftime('%s'))
-            return jsonify({'token': token, 'expires': expiration}), 200
+            expires = int(login_session.token_expires.strftime('%s'))
+            return jsonify({'token': token, 'expires': expires}), 200
         else:
             return None, status_code
     else:
-        redirect(url_for('authentication.login'))
+        return redirect(url_for('authentication.login'))
+
+
+def revoke_token(login_session):
+    token = login_session.id
+    
+    revoke_uri  = 'https://www.reddit.com/api/v1/revoke_token'
+    revoke_data = urlencode({
+      'token': token
+    }).encode('utf-8')
+
+    revoke_result, status_code = token_request(revoke_uri, revoke_data)
+
 
 @login.route('/logout', strict_slashes=False)
 def logout():
@@ -116,7 +195,7 @@ def logout():
         session.pop('session_id')
         login_session, session_id = get_login_session()
         if login_session:
+            revoke_token(login_session)
             db.session.delete(login_session)
             db.session.commit()
-            # TODO: manually de-register session
-    return None, 200
+    return None, 204
