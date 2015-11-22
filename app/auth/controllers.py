@@ -98,10 +98,10 @@ def token_request(uri, post_data):
 def obtain_token(login_session, authorization_code):
     """
     Calls OAuth2 server to get the API bearer token and refresh token
-    using the one-time code previously sent to the /auth/login endpoint
+    using the one-time code previously sent to the /auth/reddit_login endpoint
     after the first stage of authorization (user approval and redirect).
 
-    This call is used by the /auth/login endpoint.
+    This call is used by the /auth/reddit_login endpoint.
     """
     authorization_uri  = 'https://www.reddit.com/api/v1/access_token'
     authorization_post_data = {
@@ -170,12 +170,12 @@ def reddit_login():
 
                 session.pop('session_id')
 
+                flash(error)
                 authorization_failed_response = make_response(render_template('auth/login_error.html'))
                 session_expires = utcnow().strftime('%s')
                 authorization_failed_response.set_cookie('session_expires', session_expires, expires=0)
                 authorization_failed_response.status_code = 401
 
-                flash(error)
                 return authorization_failed_response
 
             if (state == session_id):
@@ -215,6 +215,7 @@ def reddit_login():
                     db.session.add(login_session)
                     db.session.commit()
 
+                    flash('could not obtain bearer token from OAuth2 server')
                     initiation_failed_response = make_response(render_template('auth/login_error.html'))
                     session.pop('session_id')
                     session_expires = utcnow().strftime('%s')
@@ -222,13 +223,13 @@ def reddit_login():
 
                     initiation_failed_response.status_code = status_code
 
-                    flash('could not obtain bearer token from OAuth2 server')
                     return initiation_failed_response
             else:
                 # User got redirected here from OAuth2 server (or pretends so)
                 # to finish the authorization of a different session
                 # than the one that is in his session_id.
                 # Unset the cookies and display error.
+                flash('authorization for different session')
                 session_not_found_response = make_response(render_template('auth/login_error.html'))
 
                 session.pop('session_id')
@@ -236,21 +237,20 @@ def reddit_login():
                 session_not_found_response.set_cookie('session_expires', session_expires, expires=0)
                 session_not_found_response.status_code = 403
                 
-                flash('authorization for different session')
                 return session_not_found_response
         elif (login_session.status == LoginSession.status_active):
             # Logged in user went to the login URL.
             # Show him an error with status code 200.
+            flash("already logged in")
             already_logged_response = make_response(render_template('auth/login_error.html'))
             already_logged_response.status_code = 200
 
-            flash("already logged in")
             return already_logged_response
         else:
             # Session with the given session_id existes in the DB,
             # but is not an active or initiating session any more.
             # Unset the session_id and session_expires cookies and try again
-            invalid_session_response = redirect(url_for('auth.login'))
+            invalid_session_response = redirect(url_for('auth.reddit_login'))
 
             session.pop('session_id')
             invalid_session_response.set_cookie('session_expires', utcnow().strftime('%s'), expires=0)
