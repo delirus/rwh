@@ -70,7 +70,8 @@ def token_request(uri, post_data):
     token_request.add_header('User-Agent', rwh.config['APP_USER_AGENT'])
 
     authenticator = http_basic_auth_handler()
-    authenticator.add_password(realm='reddit', uri=uri, user=rwh.config['APP_ID'], passwd='')
+    authenticator.add_password(realm='reddit', uri=uri,
+                               user=rwh.config['APP_ID'], passwd='')
     authenticated_opener = build_opener(authenticator)
 
     request_result = authenticated_opener.open(token_request)
@@ -87,28 +88,25 @@ def token_request(uri, post_data):
 
 def obtain_token(login_session, authorization_code):
     authorization_uri  = 'https://www.reddit.com/api/v1/access_token'
-    authorization_data = {
+    authorization_post_data = {
       'grant_type':  'authorization_code',
       'code':         authorization_code,
       'redirect_uri': rwh.config['APP_URL']
     }
 
     authorization_data, status_code = token_request(authorization_uri,
-                                                    authorization_data)
+                                                    authorization_post_data)
 
     if (status_code == 200):
         token         = authorization_data.get('access_token')
-        expiration    = authorization_data.get('expires_in')
+        expires_in    = authorization_data.get('expires_in')
         refresh_token = authorization_data.get('refresh_token')
 
-        login_session.status        = LoginSession.status_open
         login_session.token         = token
-        login_session.token_expires = utc(expiration)
+        login_session.token_expires = utcnow() + timedelta(seconds=expires_in)
         login_session.refresh_token = refresh_token
 
-        return token, expiration, 200
-    else:
-        return None, None, status_code
+    return status_code
 
 
 @login.route('/login', strict_slashes=False)
@@ -119,25 +117,43 @@ def reddit_login():
             code  = request.args.get('code')
             state = request.args.get('state')
             if (state == session_id):
-                token, expires, status_code = obtain_token(login_session, code)
+                status_code = obtain_token(login_session, code)
                 if (status_code == 200):
+                    login_session.status = LoginSession.status_active
                     db.session.add(login_session)
                     db.session.commit()
-                    expires = int(login_session.token_expires.strftime('%s'))
-                    session['session_id'] = login_session.id
-                    return jsonify({'token': token, 'expires': expires}), 200
+
+                    session['session_id'] = session_id
+                    expires = utcnow() + timedelta(minutes=rwh.config['SESSION_DURATION'])
+                    session['session_expires'] = int(expires.strftime('%s'))
+
+                    refresh = int(login_session.token_expires.strftime('%s'))
+                    return (jsonify({'session': session_id,
+                                     'status': LoginSession.status_active,
+                                     'refresh': refresh}),
+                            200)
                 else:
-                    return jsonify({'error': 'could not get bearer token'}), status_code
+                    login_session.status = LoginSession.status_failed
+                    db.session.add(login_session)
+                    db.session.commit()
+                    return (jsonify({'error': 'could not get bearer token'}),
+                            status_code)
             else:
+                session.pop('session_id')
+                session.pop('session_expires')
                 return jsonify({'error': 'no such session started'}), 440
-        if (login_session.status == LoginSession.status_open):
+        if (login_session.status == LoginSession.status_active):
             return redirect(url_for('authentication.active'))
     else:
         session_id = str(uuid.uuid4())
-        session['session_id'] = session_id
-        login_session = LoginSession(session_id) # status = 'init' by default
+        login_session = LoginSession(session_id) # default status='initiating'
         db.session.add(login_session)
         db.session.commit()
+
+        session['session_id'] = session_id
+        expires = utcnow() + timedelta(minutes=rwh.config['SESSION_DURATION'])
+        session['session_expires'] = int(expires.strftime('%s'))
+
         app_id = rwh.config['APP_ID']
         app_url = rwh.config['APP_URL']
         return redirect("https://www.reddit.com/api/v1/authorize?client_id=%s&response_type=code&state=%s&redirect_uri=%s&duration=permanent&scope=identity,submit,edit" % (app_id, session_id, app_url))
@@ -145,39 +161,45 @@ def reddit_login():
 
 def refresh_token(login_session):
     refresh_uri = 'https://www.reddit.com/api/v1/access_token'
-    refresh_data = {
+    refresh_post_data = {
       'grant_type': 'refresh_token',
       'refresh_token': login_session.refresh_token
     }
 
-    refresh_result_data, status_code = token_request(refresh_uri, refresh_data)
+    refresh_result, status_code = token_request(refresh_uri, refresh_post_data)
 
-    refresh_token  = None
     if (status_code == 200):
-        login_session.token = refresh_result_data.get('access_token')
-        login_session.token_expires = utc(refresh_result_data.get('expires_in'))
-        login_session.refresh_token = refresh_result_data.get('refresh_token')
-        refresh_token = login_session.token
-    return refresh_token, status_code
+        login_session.token = refresh_result.get('access_token')
+        expires_in = refresh_result_data.get('expires_in')
+        login_session.token_expires = utcnow() + timedelta(seconds=expires_in)
+
+    return status_code
 
 
 @login.route('/active', strict_slashes=False)
 def active():
     login_session, session_id = get_login_session()
-    if login_session and (login_session.status == LoginSession.status_open):
-        token       = login_session.token
-        status_code = 200
+    if login_session and (login_session.status == LoginSession.status_active):
         time_now = utcnow()
         login_session.last_active = time_now
-        session_end = time_now + timedelta(minutes=rwh.config['SESSION_DURATION'])
-        if (session_end > login_session.token_expires):
-            token, status_code = refresh_token(login_session)
-        session['session_id'] = login_session.id
+
+        session['session_id']      = session_id
+        expires = time_now + timedelta(minutes=rwh.config['SESSION_DURATION'])
+        session['session_expires'] = expires.strftime('%s')
+
+        status_code = 200
+        if (time_now > login_session.token_expires):
+            status_code = refresh_token(login_session)
+
+        db.session.add(login_session)
+        db.session.commit()
+
         if (status_code == 200):
-            db.session.add(login_session)
-            db.session.commit()
-            expires = int(login_session.token_expires.strftime('%s'))
-            return jsonify({'token': token, 'expires': expires}), 200
+            refresh = int(login_session.token_expires.strftime('%s'))
+            return (jsonify({'session': session_id,
+                             'status': LoginSession.status_active,
+                             'refresh': refresh}),
+                    200)
         else:
             return jsonify({'error': 'could not refresh token'}), status_code
     else:
@@ -185,23 +207,36 @@ def active():
 
 
 def revoke_token(login_session):
-    token = login_session.id
+    token = login_session.token
     
     revoke_uri  = 'https://www.reddit.com/api/v1/revoke_token'
-    revoke_data = {
+    revoke_post_data = {
       'token': token
     }
 
-    revoke_result, status_code = token_request(revoke_uri, revoke_data)
+    revoke_result, status_code = token_request(revoke_uri, revoke_post_data)
+
+    return status_code
 
 
 @login.route('/logout', strict_slashes=False)
 def logout():
     if ('session_id' in session):
-        session.pop('session_id')
+        session['session_expires'] = utcnow().strftime('%s')
         login_session, session_id = get_login_session()
         if login_session:
-            revoke_token(login_session)
-            db.session.delete(login_session)
-            db.session.commit()
-    return jsonify({'ok': 204}), 204
+            if (login_session.status == LoginSession.status_active):
+                revoke_status = revoke_token(login_session)
+                if (revoke_status != 200):
+                    return (jsonify({'error': 'could not revoke token'}),
+                            revoke_status)
+                login_session.status = LoginSession.status_unlogged
+                db.session.add(login_session)
+                db.session.commit()
+                return (jsonify({'session': session_id,
+                                 'status': LoginSession.status_unlogged}),
+                        204)
+        else:
+            return jsonify({'session': session_id, 'status': 'missing'}), 204
+    else:
+        return jsonify({'status': 'missing'}), 204
