@@ -1,13 +1,14 @@
-import os
+import os 
+from datetime import timedelta
 
 class Config(object):
-    app_id = os.environ['APP_ID']
-    app_user_agent = "RedditWriterHelper u/grepe github.com/delirus/rwh %s" % os.environ['APP_VERSION']
+    APP_ID = os.environ['APP_ID']
+    APP_USER_AGENT = "RedditWriterHelper u/grepe github.com/delirus/rwh %s" % os.environ['APP_VERSION']
     
     CSRF_ENABLED     = True
     CSRF_SESSION_KEY = os.environ['SESSION_KEY']
     SECRET_KEY       = os.environ['COOKIES_KEY']
-    session_duration = int(os.environ['SESSION_DURATION'])
+    PERMANENT_SESSION_LIFETIME = timedelta(minutes=int(os.environ['SESSION_DURATION']))
 
     db_host = os.environ['DB_HOST']
     db_name = os.environ['DB_NAME']
@@ -23,12 +24,12 @@ class Production(Config):
     DEVELOPEMNT = False
 
 class Staging(Config):
-    DEBUG       = True
+    DEBUG       = False
     TESTING     = False
     DEVELOPEMNT = True
 
 class Development(Config):
-    DEBUG       = False
+    DEBUG       = True
     TESTING     = False
     DEVELOPEMNT = True
 

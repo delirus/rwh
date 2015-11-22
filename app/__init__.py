@@ -13,15 +13,13 @@ db = SQLAlchemy(rwh)
 def not_found(error):
     return render_template("404.html"), 404
 
-@rwh.before_request
-def make_session_permanent():
-    session.permenent = True
-    rwh.permanent_session_lifetime = timedelta(minutes=rwh.config.session_duration)
-
 from app.authentication.controllers import login
 rwh.register_blueprint(login)
 
-db.create_all()
+try:
+    db.create_all()
+except sqlalchemy.exc.IntegrityError:
+    pass
 
 if __name__ == '__main__':
     rwh.run()

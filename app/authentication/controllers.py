@@ -1,16 +1,17 @@
 import uuid
 from datetime import timedelta
-from datetime.datetime import utcfromtimestamp as utc
-from datetime.datetime import utcnow as utcnow
+from datetime import datetime 
+utc = datetime.utcfromtimestamp
+utcnow = datetime.utcnow
 from urllib.parse import urlencode
 from urllib.request import Request as client_http_request
-from urllib.request import HTTPBasicAuthHandler() as http_basic_auth_handler
+from urllib.request import HTTPBasicAuthHandler as http_basic_auth_handler
 from urllib.request import build_opener
 from flask import Blueprint, request, render_template, redirect, session, url_for, jsonify
 
 from app import db, rwh
 
-from app.login.models import LoginSession
+from app.authentication.models import LoginSession
 
 
 """
@@ -65,10 +66,10 @@ def token_request(uri, post_data):
 
     request = client_http_request(uri, method='POST', data=request_data)
     request.add_header('Content-Type', 'application/x-www-form-urlencoded')
-    request.add_header('User-Agent', rwh.config.app_user_agent)
+    request.add_header('User-Agent', rwh.config['APP_USER_AGENT'])
 
     authenticator = http_basic_auth_handler()
-    authenticator.add_password(uri=uri, user=rwh.config.app_id, password='')
+    authenticator.add_password(uri=uri, user=rwh.config['APP_ID'], password='')
     authenticated_opener = build_opener(authenticator)
 
     request_result = authenticated_opener.open(refresh_request)
@@ -134,8 +135,9 @@ def reddit_login():
         login_session = LoginSession(session_id) # status = 'init' by default
         db.session.add(login_session)
         db.session.commit()
-        app_id = rwh.config.app_id
-        return redirect("https://www.reddit.com/api/v1/authorize?client_id=%s&response_type=code&state=%s&redirect_uri=https://aoiy.eu/rwh/authentication/login&duration=permanent&scope=identity,submit,edit" % (app_id, session_id))
+        app_id = rwh.config['APP_ID']
+        app_id = rwh.config['APP_URL']
+        return redirect("https://www.reddit.com/api/v1/authorize?client_id=%s&response_type=code&state=%s&redirect_uri=%s&duration=permanent&scope=identity,submit,edit" % (app_id, app_url, session_id))
 
 
 def refresh_token(login_session):
@@ -164,7 +166,7 @@ def active():
         status_code = 200
         time_now = utcnow()
         login_session.last_active = time_now
-        session_end = time_now + timedelta(minutes=rwh.config.session_duration)
+        session_end = time_now + timedelta(minutes=rwh.config['SESSION_DURATION'])
         if (session_end > login_session.token_expires):
             token, status_code = refresh_token(login_session)
         if (status_code == 200):

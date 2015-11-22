@@ -13,7 +13,7 @@ class LoginSession(db.Model):
     last_active   = db.Column(db.DateTime, default=db.func.current_timestamp(),
                                            onupdate=db.func.current_timestamp())
 
-    def __initialize__(self, session_id):
+    def __init__(self, session_id):
         self.id     = session_id
         self.status = self.status_initiating
     
