@@ -16,10 +16,6 @@ def not_found(error):
 from app.authentication.controllers import login
 rwh.register_blueprint(login)
 
-try:
-    db.create_all()
-except sqlalchemy.exc.IntegrityError:
-    pass
 
 if __name__ == '__main__':
     rwh.run()

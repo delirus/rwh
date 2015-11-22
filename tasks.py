@@ -52,3 +52,18 @@ server.add_task(stop_server, name='stop')
 namespace.add_collection(server)
 
 
+db = Collection('db')
+
+@task()
+def create_tables():
+    """
+    Creates all tables required for app DB models.
+    """
+    from app import db as app_db
+    app_db.create_all()
+
+db.add_task(create_tables, name='initialize')
+
+namespace.add_collection(db)
+
+

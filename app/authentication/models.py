@@ -2,6 +2,7 @@ from app import db
 
 class LoginSession(db.Model):
     status_initiating = 'initiating'
+    status_failed     = 'failed'
     status_active     = 'active'
     status_unlogged   = 'unlogged'
     status_expired    = 'expired'
