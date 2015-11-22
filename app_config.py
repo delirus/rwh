@@ -3,12 +3,14 @@ from datetime import timedelta
 
 class Config(object):
     APP_ID = os.environ['APP_ID']
+    APP_URL = os.environ['APP_URL']
     APP_USER_AGENT = "RedditWriterHelper u/grepe github.com/delirus/rwh %s" % os.environ['APP_VERSION']
     
     CSRF_ENABLED     = True
     CSRF_SESSION_KEY = os.environ['SESSION_KEY']
     SECRET_KEY       = os.environ['COOKIES_KEY']
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=int(os.environ['SESSION_DURATION']))
+    SESSION_DURATION = int(os.environ['SESSION_DURATION'])
 
     db_host = os.environ['DB_HOST']
     db_name = os.environ['DB_NAME']

@@ -1,4 +1,5 @@
 import uuid
+import json
 from datetime import timedelta
 from datetime import datetime 
 utc = datetime.utcfromtimestamp
@@ -24,12 +25,12 @@ login = Blueprint('authentication', __name__, url_prefix='/authentication')
 def get_login_session():
     """
     Retrieves the "session_id" and "LoginSession" object that correspond
-    to the values from the client cookies (safely encrypted by Flask).
+    to the value from the client session cookie.
     """
     login_session = None
     session_id    = session.get('session_id')
     if session_id:
-        login_session = LoginSession.query.filer_by(id=session_id).first()
+        login_session = LoginSession.query.filter_by(id=session_id).first()
     return login_session, session_id
 
 
@@ -49,7 +50,7 @@ def authenticated(call):
         if login_session and (login_session.status == LoginSession.status_open):
             call()
         else:
-            return redirect(url_for('authentication.login'))
+            return redirect(url_for('authentication.reddit_login'))
     return authenticated_call
 
 
@@ -64,19 +65,20 @@ def token_request(uri, post_data):
     """
     request_data = urlencode(post_data).encode('utf-8')
 
-    request = client_http_request(uri, method='POST', data=request_data)
-    request.add_header('Content-Type', 'application/x-www-form-urlencoded')
-    request.add_header('User-Agent', rwh.config['APP_USER_AGENT'])
+    token_request = client_http_request(uri, method='POST', data=request_data)
+    token_request.add_header('Content-Type', 'application/x-www-form-urlencoded')
+    token_request.add_header('User-Agent', rwh.config['APP_USER_AGENT'])
 
     authenticator = http_basic_auth_handler()
-    authenticator.add_password(uri=uri, user=rwh.config['APP_ID'], password='')
+    authenticator.add_password(realm='reddit', uri=uri, user=rwh.config['APP_ID'], passwd='')
     authenticated_opener = build_opener(authenticator)
 
-    request_result = authenticated_opener.open(refresh_request)
+    request_result = authenticated_opener.open(token_request)
 
     status_code = request_result.getcode()
     if request_result:
-        result_data = json.load(request_result)
+        result_body = request_result.read().decode('utf-8')
+        result_data = json.loads(result_body)
     else:
         resutl_data = None
 
@@ -85,11 +87,11 @@ def token_request(uri, post_data):
 
 def obtain_token(login_session, authorization_code):
     authorization_uri  = 'https://www.reddit.com/api/v1/access_token'
-    authorization_data = urlencode({
-      'grant_type': 'authorization_code',
-      'code':       authorization_code,
-      'state':      login_session.id
-    }).encode('utf-8')
+    authorization_data = {
+      'grant_type':  'authorization_code',
+      'code':         authorization_code,
+      'redirect_uri': rwh.config['APP_URL']
+    }
 
     authorization_data, status_code = token_request(authorization_uri,
                                                     authorization_data)
@@ -104,7 +106,7 @@ def obtain_token(login_session, authorization_code):
         login_session.token_expires = utc(expiration)
         login_session.refresh_token = refresh_token
 
-        return token, expires, 200
+        return token, expiration, 200
     else:
         return None, None, status_code
 
@@ -118,15 +120,16 @@ def reddit_login():
             state = request.args.get('state')
             if (state == session_id):
                 token, expires, status_code = obtain_token(login_session, code)
-                if (satus_code == 200):
+                if (status_code == 200):
                     db.session.add(login_session)
                     db.session.commit()
                     expires = int(login_session.token_expires.strftime('%s'))
+                    session['session_id'] = login_session.id
                     return jsonify({'token': token, 'expires': expires}), 200
                 else:
-                    return None, status_code
+                    return jsonify({'error': 'could not get bearer token'}), status_code
             else:
-                return None, 440
+                return jsonify({'error': 'no such session started'}), 440
         if (login_session.status == LoginSession.status_open):
             return redirect(url_for('authentication.active'))
     else:
@@ -136,16 +139,16 @@ def reddit_login():
         db.session.add(login_session)
         db.session.commit()
         app_id = rwh.config['APP_ID']
-        app_id = rwh.config['APP_URL']
-        return redirect("https://www.reddit.com/api/v1/authorize?client_id=%s&response_type=code&state=%s&redirect_uri=%s&duration=permanent&scope=identity,submit,edit" % (app_id, app_url, session_id))
+        app_url = rwh.config['APP_URL']
+        return redirect("https://www.reddit.com/api/v1/authorize?client_id=%s&response_type=code&state=%s&redirect_uri=%s&duration=permanent&scope=identity,submit,edit" % (app_id, session_id, app_url))
 
 
 def refresh_token(login_session):
     refresh_uri = 'https://www.reddit.com/api/v1/access_token'
-    refresh_data = urlencode({
+    refresh_data = {
       'grant_type': 'refresh_token',
       'refresh_token': login_session.refresh_token
-    }).encode('utf-8')
+    }
 
     refresh_result_data, status_code = token_request(refresh_uri, refresh_data)
 
@@ -169,24 +172,25 @@ def active():
         session_end = time_now + timedelta(minutes=rwh.config['SESSION_DURATION'])
         if (session_end > login_session.token_expires):
             token, status_code = refresh_token(login_session)
+        session['session_id'] = login_session.id
         if (status_code == 200):
             db.session.add(login_session)
             db.session.commit()
             expires = int(login_session.token_expires.strftime('%s'))
             return jsonify({'token': token, 'expires': expires}), 200
         else:
-            return None, status_code
+            return jsonify({'error': 'could not refresh token'}), status_code
     else:
-        return redirect(url_for('authentication.login'))
+        return redirect(url_for('authentication.reddit_login'))
 
 
 def revoke_token(login_session):
     token = login_session.id
     
     revoke_uri  = 'https://www.reddit.com/api/v1/revoke_token'
-    revoke_data = urlencode({
+    revoke_data = {
       'token': token
-    }).encode('utf-8')
+    }
 
     revoke_result, status_code = token_request(revoke_uri, revoke_data)
 
@@ -200,4 +204,4 @@ def logout():
             revoke_token(login_session)
             db.session.delete(login_session)
             db.session.commit()
-    return None, 204
+    return jsonify({'ok': 204}), 204
