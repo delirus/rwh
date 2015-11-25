@@ -289,10 +289,14 @@ def refresh_token(login_session):
 
     refresh_result, status_code = token_request(refresh_uri, refresh_post_data)
 
+    new_token, token_expires_in = None, None
     if (status_code == 200):
-        login_session.token = refresh_result.get('access_token')
-        expires_in = refresh_result_data.get('expires_in')
-        login_session.token_expires = utcnow() + timedelta(seconds=expires_in)
+        new_token = refresh_result.get('access_token')
+        token_expires_in = refresh_result.get('expires_in')
+
+    if (new_token and token_expiration):
+        login_session.token = new_token
+        login_session.token_expires = utcnow() + timedelta(seconds=token_expires_in)
 
     return status_code
 

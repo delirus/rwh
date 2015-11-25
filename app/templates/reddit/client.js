@@ -18,14 +18,15 @@ function RedditClient() {
   // it also requests a new bearer token if the old one has already expired
   // this should be called periodically to keep the login session alive
   this.refresh = function() {
-    var processActiveAuthResponse = function() {
+    var sessionStatusRequest = new XMLHttpRequest();
+    sessionStatusRequest.onreadystatechange = function() {
       if (sessionStatusRequest.readyState == 4 ) {
         if (sessionStatusRequest.status == 200) {
-          jsonResponse = JSON.parse(sessionStatusRequest.responseText)
-          _client.sessionId = jsonResponse.session_id
-          _client.sessionStatus = jsonResponse.session_status
-          _client.token = jsonResponse.token
-          _client.tokenExpiration = Date.now() + 1000*parseInt(jsonResponse.token_expires_in)
+          jsonResponse = JSON.parse(sessionStatusRequest.responseText);
+          _client.sessionId = jsonResponse.session_id;
+          _client.sessionStatus = jsonResponse.session_status;
+          _client.token = jsonResponse.token;
+          _client.tokenExpiration = Date.now() + 1000*parseInt(jsonResponse.token_expires_in);
         }
         else if (sessionStatusRequest.status != 500)
           throw { 'code': sessionStatusRequest.status,
@@ -34,10 +35,7 @@ function RedditClient() {
           throw { 'code': 500, 'message': 'internal server error' }
       }
     };
-    var sessionStatusRequest = new XMLHttpRequest();
-    sessionStatusRequest.onreadystatechange = processActiveAuthResponse();
     sessionStatusRequest.open("GET", "{{ app_url }}/auth/active", false);
-    sessionStatusRequest.setRequestHeader("User-Agent", "{{ user_agent }}");
     sessionStatusRequest.send();
 
     // cookies were refreshed in the above request to the <app>/auth/active URL
@@ -105,6 +103,8 @@ function RedditClient() {
         }
       }
       apiRequest.open(httpMethod, 'https://oauth.reddit.com'+apiPath, true);
+      // this header is no longer forbidden per-spec
+      // so it should work in the newest browser versions...
       apiRequest.setRequestHeader('User-Agent', "{{ user_agent }}");
       apiRequest.setRequestHeader('Authorization', 'bearer '+_call_client.token);
       apiRequest.send();

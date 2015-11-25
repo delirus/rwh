@@ -15,7 +15,7 @@ redditClient = new RedditClient();
 
 function setUsernameValue(returnedRedditData) {
   personalInfo = JSON.parse(returnedRedditData.responseText);
-  document.getElementById("username").innerHTML = personalInfo.username;
+  document.getElementById("username").innerHTML = personalInfo.name;
 }
 
 updateUsername = new redditClient.call(setUsernameValue);

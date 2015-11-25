@@ -4,8 +4,8 @@ from datetime import timedelta
 class Config(object):
     APP_ID = os.environ['APP_ID']
     APP_URL = os.environ['APP_URL']
-    APP_USER_AGENT_SERVER = "RedditWriterHelper web-server_backend u/grepe github.com/delirus/rwh %s" % os.environ['APP_VERSION']
-    APP_USER_AGENT_CLIENT = "RedditWriterHelper in-browser_frontend u/grepe github.com/delirus/rwh %s" % os.environ['APP_VERSION']
+    APP_USER_AGENT_SERVER = "web-server_backend:RedditWriterHelper:github.com/delirus/rwh/tree/%s (by u/grepe)" % os.environ['APP_VERSION']
+    APP_USER_AGENT_CLIENT = "in-browser_frontend:RedditWriterHelper:github.com/delirus/rwh/tree/%s (by u/grepe)" % os.environ['APP_VERSION']
     
     CSRF_ENABLED     = True
     CSRF_SESSION_KEY = os.environ['SESSION_KEY']
