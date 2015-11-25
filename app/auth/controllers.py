@@ -41,19 +41,19 @@ def authenticated(call):
 
     e.g. route /private_path defined as
 
-        @authenticated
         @route("/private_path")
+        @authenticated
         def private_path(...):
           ...
 
-    will be accessible only to the authenticated users.
-    Non-authenticated user will be redirected to the /auth/login URL
-    and redirect_url cookie will be set for them to come back after login.
+    (mind the order of decorators) can be accessed only by authenticated user.
+    Non-authenticated users will be redirected to the /auth/login URL
+    and the redirect_url cookie will be set for them to come back after login.
     """
     def authenticated_call():
         login_session, session_id = get_login_session()
-        if login_session and (login_session.status == LoginSession.status_open):
-            call()
+        if login_session and (login_session.status == LoginSession.status_active):
+            return call()
         else:
             login_redirect_response = redirect(url_for('auth.reddit_login'))
             login_redirect_response.set_cookie('redirect_url', request.url)
@@ -74,7 +74,7 @@ def token_request(uri, post_data):
 
     token_request = client_http_request(uri, method='POST', data=request_data)
     token_request.add_header('Content-Type', 'application/x-www-form-urlencoded')
-    token_request.add_header('User-Agent', rwh.config['APP_USER_AGENT'])
+    token_request.add_header('User-Agent', rwh.config['APP_USER_AGENT_SERVER'])
 
     authenticator = http_basic_auth_handler()
     authenticator.add_password(realm='reddit', uri=uri,
@@ -107,7 +107,7 @@ def obtain_token(login_session, authorization_code):
     authorization_post_data = {
       'grant_type':  'authorization_code',
       'code':         authorization_code,
-      'redirect_uri': rwh.config['APP_URL']
+      'redirect_uri': url_for('auth.reddit_login')
     }
 
     authorization_data, status_code = token_request(authorization_uri,
@@ -139,7 +139,7 @@ def reddit_login():
     What exactly happens then depends on the stage the authorization is in.
     It maintains the state via storing LoginSession object (state),
     setting the encripted 'session_id' cookie to identify corresponding object
-    and maintaining 'session_expires' cookie (see /auth/active endpoint).
+    and maintaining 'session_expires_in' cookie (see /auth/active endpoint).
 
     In case of faliure the template login_error.html is rendered
     and the corresponding error is flashed. More underlying information
@@ -168,12 +168,12 @@ def reddit_login():
                 db.session.add(login_session)
                 db.session.commit()
 
-                session.pop('session_id')
 
                 flash(error)
                 authorization_failed_response = make_response(render_template('auth/login_error.html'))
-                session_expires = utcnow().strftime('%s')
-                authorization_failed_response.set_cookie('session_expires', session_expires, expires=0)
+
+                session.pop('session_id')
+                authorization_failed_response.set_cookie('session_expires_in', '-1', expires=0)
                 authorization_failed_response.status_code = 401
 
                 return authorization_failed_response
@@ -194,16 +194,16 @@ def reddit_login():
 
                     default_redirect_url = request.url_root
                     given_redirect_url   = request.cookies.get('redirect_url')
-                    if given_redirect_url:
+                    if given_redirect_url and (len(given_redirect_url) > 0):
                         login_redirect_response = redirect(given_redirect_url)
                         # unset the redirect_url after it is used
-                        login_redirect_response.set_cookie('redirect_url', expires=0)
+                        login_redirect_response.set_cookie('redirect_url', '', expires=0)
                     else:
                         login_redirect_response = redirect(default_redirect_url)
 
                     session['session_id'] = session_id
-                    expires = utcnow() + timedelta(minutes=rwh.config['SESSION_DURATION'])
-                    login_redirect_response.set_cookie('session_expires', expires.strftime('%s'))
+                    session_expires_in    = str(rwh.config['SESSION_DURATION'])
+                    login_redirect_response.set_cookie('session_expires_in', expires)
 
                     return login_redirect_response
                 else:
@@ -218,42 +218,41 @@ def reddit_login():
                     flash('could not obtain bearer token from OAuth2 server')
                     initiation_failed_response = make_response(render_template('auth/login_error.html'))
                     session.pop('session_id')
-                    session_expires = utcnow().strftime('%s')
-                    initiation_failed_response.set_cookie('session_expires', session_expires, expires=0)
+                    initiation_failed_response.set_cookie('session_expires_in', '-1', expires=0)
 
                     initiation_failed_response.status_code = status_code
 
                     return initiation_failed_response
             else:
-                # User got redirected here from OAuth2 server (or pretends so)
-                # to finish the authorization of a different session
+                # User got redirected here from OAuth2 server
+                # (or tries to pretend that he did)
+                # and attempts to finish an authorization for different session
                 # than the one that is in his session_id.
                 # Unset the cookies and display error.
-                flash('authorization for different session')
+                flash('no such session started')
                 session_not_found_response = make_response(render_template('auth/login_error.html'))
 
                 session.pop('session_id')
-                session_expires = utcnow().strftime('%s')
-                session_not_found_response.set_cookie('session_expires', session_expires, expires=0)
+                session_not_found_response.set_cookie('session_expires_in', '-1', expires=0)
                 session_not_found_response.status_code = 403
                 
                 return session_not_found_response
         elif (login_session.status == LoginSession.status_active):
             # Logged in user went to the login URL.
-            # Show him an error with status code 200.
+            # Show him an error with status code 409 (conflict).
             flash("already logged in")
             already_logged_response = make_response(render_template('auth/login_error.html'))
-            already_logged_response.status_code = 200
+            already_logged_response.status_code = 409
 
             return already_logged_response
         else:
             # Session with the given session_id existes in the DB,
             # but is not an active or initiating session any more.
-            # Unset the session_id and session_expires cookies and try again
+            # Unset the session_id and session_expires_in cookies and try again
             invalid_session_response = redirect(url_for('auth.reddit_login'))
 
             session.pop('session_id')
-            invalid_session_response.set_cookie('session_expires', utcnow().strftime('%s'), expires=0)
+            invalid_session_response.set_cookie('session_expires_in', '-1', expires=0)
 
             return invalid_session_response
     else:
@@ -265,13 +264,12 @@ def reddit_login():
         db.session.commit()
 
         app_id = rwh.config['APP_ID']
-        app_url = rwh.config['APP_URL']
+        app_url = url_for('auth.reddit_login')
         authorization_redirect_response = redirect("https://www.reddit.com/api/v1/authorize?client_id=%s&response_type=code&state=%s&redirect_uri=%s&duration=permanent&scope=identity,submit,edit" % (app_id, session_id, app_url))
 
         session['session_id'] = session_id
-        expires = utcnow() + timedelta(minutes=rwh.config['SESSION_DURATION'])
-        session_expires = expires.strftime('%s')
-        authorization_redirect_response.set_cookie('session_expires', session_expires)
+        session_expires_in = str(rwh.config['SESSION_DURATION'])
+        authorization_redirect_response.set_cookie('session_expires_in', session_expires_in)
 
         return authorization_redirect_response
 
@@ -313,7 +311,7 @@ def active():
     This way the client can know that the app has the required permissions
     to make calls to the Reddit API.
 
-    Beside of that, a cookie 'session_expires' is set, which indicates
+    Beside of that, a cookie 'session_expires_in' is set, which indicates
     how long will the app respond to this call. After the time indicated
     in this cookie the app will revoke its access and client must log in again.
     After every call to this endpoint this time is shifted further to future
@@ -332,26 +330,33 @@ def active():
         db.session.add(login_session)
         db.session.commit()
 
-        session['session_id']      = session_id
-
-        expires = time_now + timedelta(minutes=rwh.config['SESSION_DURATION'])
-        session_expires = expires.strftime('%s') # session_expires cookie
+        session['session_id'] = session_id
+        session_expires_in    = str(rwh.config['SESSION_DURATION'])
 
         if (status_code == 200):
-            refresh = int(login_session.token_expires.strftime('%s'))
-            session_refreshed_response = jsonify({'session': session_id,
-                                                  'status': LoginSession.status_active,
-                                                  'refresh': refresh})
-            session_refreshed_response.set_cookie('session_expires', session_expires)
+            token_expires_in = int(login_session.token_expires.strftime('%s')) - int(utcnow().strftime('%s')) 
+            session_refreshed_response = jsonify({'session_id': session_id,
+                                                  'session_status': LoginSession.status_active,
+                                                  'token': login_session.token,
+                                                  'token_expires_in': token_expires_in})
+            session_refreshed_response.set_cookie('session_expires_in', session_expires_in)
+            session_refreshed_response.status_code = 200
+
             return session_refreshed_response
         else:
+            # report error but give the client a chance to try again later
             refresh_failed_response = jsonify({'error': 'could not refresh token'})
-            refresh_failed_response.set_cookie('session_expires', session_expires)
+            session['session_id'] = session_id
+            refresh_failed_response.set_cookie('session_expires_in', session_expires_in)
             refresh_failed_response.status_code = status_code
+            
             return refresh_failed_response
     else:
-        unauthenticated_response = jsonify({'error': 'user not authenticated'})
-        unauthenticated_response.status_code = 422
+        unauthenticated_response = jsonify({'error': 'user not logged in'})
+        session.pop('session_id')
+        unauthenticated_response.set_cookie('session_expires_in', '-1', 'session_expires_in')
+        unauthenticated_response.status_code = 401
+
         return unauthenticated_response
 
 
@@ -382,10 +387,9 @@ def logout():
     e.g. using AJAX Javascript call from separate logout page.
 
     It always returns JSON object with result of the operation
-    and sets the 'session_expires' cookie to present time
+    and sets the 'session_expires_in' cookie to present time
     (or unsets it if the session was invalid in the first place).
     """
-    time_now = utcnow().strftime('%s') # "session_expires" cookie value
     if ('session_id' in session):
         login_session, session_id = get_login_session()
         if login_session:
@@ -393,34 +397,45 @@ def logout():
                 revoke_status = revoke_token(login_session)
                 if (revoke_status != 204):
                     revoke_failed_response = jsonify({'error': 'could not revoke token'})
-                    revoke_failed_response.set_cookie('session_expires', time_now)
+                    # indicate error and refresh session and session_expires_in cookies
+                    # so that client can attempt to properly logout later
                     revoke_failed_response.status_code = revoke_status
+                    session['session_id'] = session_id
+                    session_expires_in = str(rwh.config['SESSION_DURATION'])
+                    revoke_failed_response.set_cookie('session_expires_in', session_expires_in)
+
                     return revoke_failed_response
 
                 login_session.status = LoginSession.status_unlogged
                 db.session.add(login_session)
                 db.session.commit()
 
-                session_unlogged_response = jsonify({'session': session_id,
-                                                     'status': LoginSession.status_unlogged})
-                session_unlogged_response.set_cookie('session_expires', time_now)
+                session_unlogged_response = jsonify({'session_id': session_id,
+                                                     'session_status': LoginSession.status_unlogged})
                 session_unlogged_response.status_code = 200
+                session.pop('session_id')
+                session_unlogged_response.set_cookie('session_expires_in', '-1', expires=0)
+
                 return session_unlogged_response
             else:
-                session_invalid_response = jsonify({'session': session_id,
-                                                    'status': login_session.status})
-                session_invalid_response.set_cookie('session_expires', time_now)
-                session_invalid_response.status_code = 200
+                session_invalid_response = jsonify({'session_id': session_id,
+                                                    'session_status': login_session.status})
+                session_invalid_response.status_code = 202
+                session.pop('session_id')
+                session_invalid_response.set_cookie('session_expires_in', '-1', expires=0)
+
                 return session_invalid_response
         else:
             session_not_found_response = jsonify({'session': session_id,
                                                   'error': 'session not found'})
             session_not_found_response.status_code = 404
-            session_not_found_response.set_cookie('session_expires', time_now, expires=0)
             session.pop('session_id')
+            session_not_found_response.set_cookie('session_expires_in', '-1', expires=0)
+
             return session_not_found_response
     else:
         missing_session_id_response = jsonify({'error': 'missing session_id'})
-        missing_session_id_response.set_cookie('session_expires', time_now, expires=0)
         missing_session_id_response.status_code = 400
+        missing_session_id_response.set_cookie('session_expires_in', '-1', expires=0)
+
         return missing_session_id_response

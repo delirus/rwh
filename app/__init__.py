@@ -16,6 +16,12 @@ def not_found(error):
 from app.auth.controllers import auth_blueprint
 rwh.register_blueprint(auth_blueprint)
 
+from app.reddit.controllers import reddit_blueprint
+rwh.register_blueprint(reddit_blueprint)
+
+from app.profile.controllers import profile_blueprint
+rwh.register_blueprint(profile_blueprint)
+
 
 if __name__ == '__main__':
     rwh.run()

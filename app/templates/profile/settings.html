@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<h2>Profile</h2>
+
+<button type="button" onclick="loadUsername()">Request data</button>
+
+<p id="username"></p>
+
+
+<script>
+function loadUsername() {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (xhttp.readyState == 4 && xhttp.status == 200) {
+      document.getElementById("username").innerHTML = xhttp.responseText;
+    }
+  };
+  xhttp.open("GET", "https://oauth.reddit.com/api/v1/me", true);
+  xhttp.setRequestHeader("User-Agent", "{{ user_agent }}");
+  xhttp.setRequestHeader("Authorization", "bearer {{ token }}");
+  xhttp.send();
+}
+</script>
+
+</body>
+</html>

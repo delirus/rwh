@@ -1,7 +1,7 @@
 export APP_SETTINGS="app_config.Production"
 
 export APP_ID="reddit_app_id"
-export APP_URL="https://aoiy.eu/rwh/auth/login"
+export APP_URL="https://aoiy.eu/rwh" # excluding redirect_uri path (auth/login)
 export APP_VERSION=$(git log | head -n1)
 
 export DB_HOST="db_host"
@@ -11,7 +11,7 @@ export DB_PASS="db_password"
 
 export SESSION_KEY="secret_key_1"
 export COOKIES_KEY="secret_key_2"
-export SESSION_DURATION=5 # minutes
+export SESSION_DURATION=900 # seconds
 
 export GUNICORN_LOGS="log"
 export GUNICORN_PID="gunicorn.pid"
