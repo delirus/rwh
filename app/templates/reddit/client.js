@@ -106,7 +106,7 @@ function RedditClient() {
     }
   }
 
-  // ping backend to let it know that there is an active client now
-  // and obtain the current the bearer token
+  // let the backend know that there is an active client now
+  // and obtain a valid bearer token from current login session
   refresh();
 }

@@ -107,7 +107,7 @@ def obtain_token(login_session, authorization_code):
     authorization_post_data = {
       'grant_type':  'authorization_code',
       'code':         authorization_code,
-      'redirect_uri': url_for('auth.reddit_login')
+      'redirect_uri': "%s%s" % (rwh.config['APP_URL'], url_for('auth.reddit_login'))
     }
 
     authorization_data, status_code = token_request(authorization_uri,
@@ -167,7 +167,6 @@ def reddit_login():
                 login_session.status = LoginSession.status_failed
                 db.session.add(login_session)
                 db.session.commit()
-
 
                 flash(error)
                 authorization_failed_response = make_response(render_template('auth/login_error.html'))
@@ -264,7 +263,7 @@ def reddit_login():
         db.session.commit()
 
         app_id = rwh.config['APP_ID']
-        app_url = url_for('auth.reddit_login')
+        app_url = "%s%s" % (rwh.config['APP_URL'], url_for('auth.reddit_login'))
         authorization_redirect_response = redirect("https://www.reddit.com/api/v1/authorize?client_id=%s&response_type=code&state=%s&redirect_uri=%s&duration=permanent&scope=identity,submit,edit" % (app_id, session_id, app_url))
 
         session['session_id'] = session_id
