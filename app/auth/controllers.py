@@ -201,8 +201,8 @@ def reddit_login():
                         login_redirect_response = redirect(default_redirect_url)
 
                     session['session_id'] = session_id
-                    session_expires_in    = str(rwh.config['SESSION_DURATION'])
-                    login_redirect_response.set_cookie('session_expires_in', expires)
+                    session_expires_in    = rwh.config['SESSION_DURATION']
+                    login_redirect_response.set_cookie('session_expires_in', session_expires_in)
 
                     return login_redirect_response
                 else:
@@ -267,7 +267,7 @@ def reddit_login():
         authorization_redirect_response = redirect("https://www.reddit.com/api/v1/authorize?client_id=%s&response_type=code&state=%s&redirect_uri=%s&duration=permanent&scope=identity,submit,edit" % (app_id, session_id, app_url))
 
         session['session_id'] = session_id
-        session_expires_in = str(rwh.config['SESSION_DURATION'])
+        session_expires_in = rwh.config['SESSION_DURATION']
         authorization_redirect_response.set_cookie('session_expires_in', session_expires_in)
 
         return authorization_redirect_response
@@ -311,11 +311,9 @@ def active():
     to make calls to the Reddit API.
 
     Beside of that, a cookie 'session_expires_in' is set, which indicates
-    how long will the app respond to this call. After the time indicated
-    in this cookie the app will revoke its access and client must log in again.
-    After every call to this endpoint this time is shifted further to future
-    to the time now + SESSION_DURATION. This way the app does not maintain
-    access for long-term inactive users.
+    how long will the app respond to this call. After the time
+        now + SESSION_DURATION
+    the app will revoke its access and client must log and authorize app again.
     """
     login_session, session_id = get_login_session()
     if login_session and (login_session.status == LoginSession.status_active):
@@ -330,7 +328,7 @@ def active():
         db.session.commit()
 
         session['session_id'] = session_id
-        session_expires_in    = str(rwh.config['SESSION_DURATION'])
+        session_expires_in    = rwh.config['SESSION_DURATION']
 
         if (status_code == 200):
             token_expires_in = int(login_session.token_expires.strftime('%s')) - int(utcnow().strftime('%s')) 
@@ -400,7 +398,7 @@ def logout():
                     # so that client can attempt to properly logout later
                     revoke_failed_response.status_code = revoke_status
                     session['session_id'] = session_id
-                    session_expires_in = str(rwh.config['SESSION_DURATION'])
+                    session_expires_in = rwh.config['SESSION_DURATION']
                     revoke_failed_response.set_cookie('session_expires_in', session_expires_in)
 
                     return revoke_failed_response

@@ -19,7 +19,10 @@ function setUsernameValue(returnedRedditData) {
 }
 
 updateUsername = new redditClient.call(setUsernameValue);
-updateUsername.after('GET', '/api/v1/me');
+
+function loadUsername() {
+  updateUsername.after('GET', '/api/v1/me');
+}
 </script>
 
 </body>

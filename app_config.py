@@ -11,7 +11,7 @@ class Config(object):
     CSRF_SESSION_KEY = os.environ['SESSION_KEY']
     SECRET_KEY       = os.environ['COOKIES_KEY']
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=int(os.environ['SESSION_DURATION']))
-    SESSION_DURATION = int(os.environ['SESSION_DURATION'])
+    SESSION_DURATION = os.environ['SESSION_DURATION']
 
     db_host = os.environ['DB_HOST']
     db_name = os.environ['DB_NAME']

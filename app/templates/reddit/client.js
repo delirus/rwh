@@ -1,14 +1,16 @@
 function RedditClient() {
+  var _client = this;
+
   // extracts the value of a cookie with given name
   var getCookie = function(cookieName) {
     var cookieIdentifier = cookieName + '=';
     var allCookies = document.cookie.split(';');
-    for(var i=0; i<allCookies.length; i++) {
+    for(var i=0; i < allCookies.length; i++) {
       var cookie = allCookies[i];
       while (cookie.charAt(0)==' ')
         cookie = cookie.substring(1);
       if (cookie.indexOf(cookieIdentifier) == 0)
-        return cookie.substring(cookieIdentifier.length, cookie.length));
+        return cookie.substring(cookieIdentifier.length, cookie.length);
     }
   }
 
@@ -16,14 +18,14 @@ function RedditClient() {
   // it also requests a new bearer token if the old one has already expired
   // this should be called periodically to keep the login session alive
   this.refresh = function() {
-    var processActiveAuthResponse = function(client) {
+    var processActiveAuthResponse = function() {
       if (sessionStatusRequest.readyState == 4 ) {
         if (sessionStatusRequest.status == 200) {
           jsonResponse = JSON.parse(sessionStatusRequest.responseText)
-          client.sessionId = jsonResponse.session_id
-          client.sessionStatus = jsonResponse.session_status
-          client.token = jsonResponse.token
-          client.tokenExpiration = Date.now() + 1000*parseInt(jsonResponse.token_expires_in)
+          _client.sessionId = jsonResponse.session_id
+          _client.sessionStatus = jsonResponse.session_status
+          _client.token = jsonResponse.token
+          _client.tokenExpiration = Date.now() + 1000*parseInt(jsonResponse.token_expires_in)
         }
         else if (sessionStatusRequest.status != 500)
           throw { 'code': sessionStatusRequest.status,
@@ -33,14 +35,14 @@ function RedditClient() {
       }
     };
     var sessionStatusRequest = new XMLHttpRequest();
-    sessionStatusRequest.onreadystatechange = processActiveAuthResponse(super);
-    xhttp.open("GET", "{{ app_url }}/auth/active", false);
-    xhttp.setRequestHeader("User-Agent", "{{ user_agent }}");
-    xhttp.send();
+    sessionStatusRequest.onreadystatechange = processActiveAuthResponse();
+    sessionStatusRequest.open("GET", "{{ app_url }}/auth/active", false);
+    sessionStatusRequest.setRequestHeader("User-Agent", "{{ user_agent }}");
+    sessionStatusRequest.send();
 
     // cookies were refreshed in the above request to the <app>/auth/active URL
     // so the "session_expires_in" cookie value is now valid
-    this.sessionExpiration = Date.now() + 1000*parseInt(getCookie('session_expires_in')));
+    _client.sessionExpiration = Date.now() + 1000*parseInt(getCookie('session_expires_in'));
   }
   
   // registers a new callback function that will be called after query
@@ -51,6 +53,9 @@ function RedditClient() {
   // and error processing function, which will be called if the API request fails
   // the error processing function can be omitted
   this.call = function(resultProcessor, errorProcessor) {
+    _call = this;
+    _call_client = _client;
+
     if (typeof resultProcessor !== 'undefined')
       this.resultProcessor = resultProcessor;
     else
@@ -81,32 +86,32 @@ function RedditClient() {
 
       time_now = Date.now();
 
-      if (time_now > sessionExpiration)
+      if (time_now > _call_client.sessionExpiration)
         throw { 'code': null, 'message': 'login session expired' };
 
-      if (time_now > tokenExpiration)
-        refresh();
+      if (time_now > _call_client.tokenExpiration)
+        _call_client.refresh();
       
       var apiRequest = new XMLHttpRequest();
       apiRequest.onreadystatechange = function() {
         if (apiRequest.readyState == 4) {
           if (apiRequest.status == 200)
-            resultProcessor(apiRequest);
+            _call.resultProcessor(apiRequest);
           else
-            if errorProcessor
-              errorProcessor(apiRequest)
+            if (_call.errorProcessor)
+              _call.errorProcessor(apiRequest)
             else
               throw { 'code': apiRequest.status, 'message': 'request failed' }
         }
       }
-      xhttp.open(httpMethod, 'https://oauth.reddit.com'+apiPath, true);
-      xhttp.setRequestHeader('User-Agent', "{{ user_agent }}");
-      xhttp.setRequestHeader('Authorization', 'bearer '+token);
-      xhttp.send();
+      apiRequest.open(httpMethod, 'https://oauth.reddit.com'+apiPath, true);
+      apiRequest.setRequestHeader('User-Agent', "{{ user_agent }}");
+      apiRequest.setRequestHeader('Authorization', 'bearer '+_call_client.token);
+      apiRequest.send();
     }
   }
 
   // let the backend know that there is an active client now
   // and obtain a valid bearer token from current login session
-  refresh();
+  this.refresh();
 }
