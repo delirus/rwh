@@ -1,6 +1,9 @@
 function RedditClient() {
   var _client = this;
 
+  this.initiating = true;
+  this.waiting_requests = [];
+
   // extracts the value of a cookie with given name
   var getCookie = function(cookieName) {
     var cookieIdentifier = cookieName + '=';
@@ -27,6 +30,19 @@ function RedditClient() {
           _client.sessionStatus = jsonResponse.session_status;
           _client.token = jsonResponse.token;
           _client.tokenExpiration = Date.now() + 1000*parseInt(jsonResponse.token_expires_in);
+          // cookies were refreshed in this very request
+          // so the value of the "session_expires_in" cookie is now valid
+          _client.sessionExpiration = Date.now() + 1000*parseInt(getCookie('session_expires_in'));
+
+          _client.initiating = false;
+          // process requests that were issued before the client was initiated
+          number_of_waiting_requests = _client.waiting_requests.length;
+          if (number_of_waiting_requests > 0) {
+            for (var i=0; i<number_of_waiting_requests; i++) {
+              request = waiting_requests[i];
+              request.sendWithData();
+            }
+          }
         }
         else if (sessionStatusRequest.status != 500)
           throw { 'code': sessionStatusRequest.status,
@@ -35,12 +51,8 @@ function RedditClient() {
           throw { 'code': 500, 'message': 'internal server error' }
       }
     };
-    sessionStatusRequest.open("GET", "{{ app_url }}/auth/active", false);
+    sessionStatusRequest.open("GET", "{{ app_url }}/auth/active", true);
     sessionStatusRequest.send();
-
-    // cookies were refreshed in the above request to the <app>/auth/active URL
-    // so the "session_expires_in" cookie value is now valid
-    _client.sessionExpiration = Date.now() + 1000*parseInt(getCookie('session_expires_in'));
   }
   
   // registers a new callback function that will be called after query
@@ -51,8 +63,8 @@ function RedditClient() {
   // and error processing function, which will be called if the API request fails
   // the error processing function can be omitted
   this.call = function(resultProcessor, errorProcessor) {
-    _call = this;
-    _call_client = _client;
+    var _call = this;
+    var _call_client = _client;
 
     if (typeof resultProcessor !== 'undefined')
       this.resultProcessor = resultProcessor;
@@ -84,11 +96,13 @@ function RedditClient() {
 
       time_now = Date.now();
 
-      if (time_now > _call_client.sessionExpiration)
-        throw { 'code': null, 'message': 'login session expired' };
+      if (!_call_client.initiating) {
+        if (time_now > _call_client.sessionExpiration)
+          throw { 'code': null, 'message': 'login session expired' };
 
-      if (time_now > _call_client.tokenExpiration)
-        _call_client.refresh();
+        if (time_now > _call_client.tokenExpiration)
+          _call_client.refresh();
+      }
       
       var apiRequest = new XMLHttpRequest();
       apiRequest.onreadystatechange = function() {
@@ -107,7 +121,30 @@ function RedditClient() {
       // so it should work in the newest browser versions...
       apiRequest.setRequestHeader('User-Agent', "{{ user_agent }}");
       apiRequest.setRequestHeader('Authorization', 'bearer '+_call_client.token);
-      apiRequest.send();
+      if (requestData) {
+        stringData = null
+        if (typeof requestData === 'object') {
+          apiRequest.setRequestHeader('Content-Type', 'application/json; charset=utf-8');
+          stringData = JSON.stringify(requestData);
+        }
+        else {
+          stringData = requestData.toString();
+        }
+        apiRequest.redditRequestData = stringData;
+        apiRequest.setRequestHeader('Content-Length', stringData.length);
+        apiRequest.sendWithData = function() {
+          send(redditRequestData);
+        }
+      }
+      else {
+        apiRequest.sendWithData = apiRequest.send
+      }
+      // only send the request if the client has already been initiated
+      // queue it for after the initiation succeeds otherwise
+      if (_call_client.initiating)
+        _call_client.push(apiRequest);
+      else
+        apiRequest.sendWithData();
     }
   }
 

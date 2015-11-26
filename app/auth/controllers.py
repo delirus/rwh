@@ -171,7 +171,8 @@ def reddit_login():
                 flash(error)
                 authorization_failed_response = make_response(render_template('auth/login_error.html'))
 
-                session.pop('session_id')
+                if ('session_id') in session:
+                    session.pop('session_id')
                 authorization_failed_response.set_cookie('session_expires_in', '-1', expires=0)
                 authorization_failed_response.status_code = 401
 
@@ -216,7 +217,8 @@ def reddit_login():
 
                     flash('could not obtain bearer token from OAuth2 server')
                     initiation_failed_response = make_response(render_template('auth/login_error.html'))
-                    session.pop('session_id')
+                    if ('session_id') in session:
+                        session.pop('session_id')
                     initiation_failed_response.set_cookie('session_expires_in', '-1', expires=0)
 
                     initiation_failed_response.status_code = status_code
@@ -231,7 +233,8 @@ def reddit_login():
                 flash('no such session started')
                 session_not_found_response = make_response(render_template('auth/login_error.html'))
 
-                session.pop('session_id')
+                if ('session_id') in session:
+                    session.pop('session_id')
                 session_not_found_response.set_cookie('session_expires_in', '-1', expires=0)
                 session_not_found_response.status_code = 403
                 
@@ -250,7 +253,8 @@ def reddit_login():
             # Unset the session_id and session_expires_in cookies and try again
             invalid_session_response = redirect(url_for('auth.reddit_login'))
 
-            session.pop('session_id')
+            if ('session_id') in session:
+                session.pop('session_id')
             invalid_session_response.set_cookie('session_expires_in', '-1', expires=0)
 
             return invalid_session_response
@@ -294,7 +298,7 @@ def refresh_token(login_session):
         new_token = refresh_result.get('access_token')
         token_expires_in = refresh_result.get('expires_in')
 
-    if (new_token and token_expiration):
+    if (new_token and token_expires_in):
         login_session.token = new_token
         login_session.token_expires = utcnow() + timedelta(seconds=token_expires_in)
 
@@ -354,8 +358,9 @@ def active():
             return refresh_failed_response
     else:
         unauthenticated_response = jsonify({'error': 'user not logged in'})
-        session.pop('session_id')
-        unauthenticated_response.set_cookie('session_expires_in', '-1', 'session_expires_in')
+        if ('session_id') in session:
+            session.pop('session_id')
+        unauthenticated_response.set_cookie('session_expires_in', '-1', expires=0)
         unauthenticated_response.status_code = 401
 
         return unauthenticated_response
@@ -414,7 +419,8 @@ def logout():
                 session_unlogged_response = jsonify({'session_id': session_id,
                                                      'session_status': LoginSession.status_unlogged})
                 session_unlogged_response.status_code = 200
-                session.pop('session_id')
+                if ('session_id') in session:
+                    session.pop('session_id')
                 session_unlogged_response.set_cookie('session_expires_in', '-1', expires=0)
 
                 return session_unlogged_response
@@ -422,7 +428,8 @@ def logout():
                 session_invalid_response = jsonify({'session_id': session_id,
                                                     'session_status': login_session.status})
                 session_invalid_response.status_code = 202
-                session.pop('session_id')
+                if ('session_id') in session:
+                    session.pop('session_id')
                 session_invalid_response.set_cookie('session_expires_in', '-1', expires=0)
 
                 return session_invalid_response
@@ -430,7 +437,8 @@ def logout():
             session_not_found_response = jsonify({'session': session_id,
                                                   'error': 'session not found'})
             session_not_found_response.status_code = 404
-            session.pop('session_id')
+            if ('session_id') in session:
+                session.pop('session_id')
             session_not_found_response.set_cookie('session_expires_in', '-1', expires=0)
 
             return session_not_found_response

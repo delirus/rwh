@@ -2,7 +2,7 @@ export APP_SETTINGS="app_config.Production"
 
 export APP_ID="reddit_app_id"
 export APP_URL="https://aoiy.eu/rwh" # excluding redirect_uri path (auth/login)
-export APP_VERSION=$(git log | head -n1 | cut -f2)
+export APP_VERSION=$(git log | head -n1 | cut -d' ' -f2)
 
 export DB_HOST="db_host"
 export DB_NAME="db_name"
