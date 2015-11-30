@@ -61,6 +61,18 @@ def authenticated(call):
     return authenticated_call
 
 
+@auth_blueprint.route('/client.js')
+@authenticated
+def client_js():
+    """
+    Renders the client JS code that deals with Reddit API.
+    This is not static since it may contain parts that depend on the app config.
+    """
+    user_agent_string = rwh.config['APP_USER_AGENT_CLIENT']
+    app_url_string    = rwh.config['APP_URL']
+    return render_template('auth/client.js', user_agent=user_agent_string, app_url=app_url_string)
+
+
 def token_request(uri, post_data):
     """
     This function encapsulates the code used to make the request

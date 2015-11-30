@@ -1,7 +1,7 @@
-function RedditClient() {
+function AuthClient() {
   var _client = this;
 
-  this.initiating = true;
+  this.ready = false;
   this.waiting_requests = [];
 
   // extracts the value of a cookie with given name
@@ -21,6 +21,7 @@ function RedditClient() {
   // it also requests a new bearer token if the old one has already expired
   // this should be called periodically to keep the login session alive
   this.refresh = function() {
+    _client.ready = false;
     var sessionStatusRequest = new XMLHttpRequest();
     sessionStatusRequest.onreadystatechange = function() {
       if (sessionStatusRequest.readyState == 4 ) {
@@ -34,7 +35,7 @@ function RedditClient() {
           // so the value of the "session_expires_in" cookie is now valid
           _client.sessionExpiration = Date.now() + 1000*parseInt(getCookie('session_expires_in'));
 
-          _client.initiating = false;
+          _client.ready = false;
           // process requests that were issued before the client was initiated
           number_of_waiting_requests = _client.waiting_requests.length;
           if (number_of_waiting_requests > 0) {
@@ -55,16 +56,18 @@ function RedditClient() {
     sessionStatusRequest.send();
   }
   
-  // registers a new callback function that will be called after query
+  // registers a new callback function that will be called
+  // after a query called on this object finishes
   // intended use is this:
-  //     processQueryResult = new redditClientInstance.call(myResultProcessingFunction)
+  //     processQueryResult = new authClientInstance.requestResultHandler(myResultProcessingFunction)
   //     processQueryResult.after('GET', '/api/v1/me')
+  // (see "call" function for shorthand syntax)
   // the parameters are the callback function
-  // and error processing function, which will be called if the API request fails
-  // the error processing function can be omitted
-  this.call = function(resultProcessor, errorProcessor) {
-    var _call = this;
-    var _call_client = _client;
+  // and error processing function to called if the API request fails
+  // if the error processing function is omitted, an error is thrown instead
+  this.requestResultHandler = function(resultProcessor, errorProcessor) {
+    var _handler = this;
+    var _handler_client = _client;
 
     if (typeof resultProcessor !== 'undefined')
       this.resultProcessor = resultProcessor;
@@ -96,22 +99,22 @@ function RedditClient() {
 
       time_now = Date.now();
 
-      if (!_call_client.initiating) {
-        if (time_now > _call_client.sessionExpiration)
+      if (_handler_client.ready) {
+        if (time_now > _handler_client.sessionExpiration)
           throw { 'code': null, 'message': 'login session expired' };
 
-        if (time_now > _call_client.tokenExpiration)
-          _call_client.refresh();
+        if (time_now > _handler_client.tokenExpiration)
+          _handler_client.refresh();
       }
       
       var apiRequest = new XMLHttpRequest();
       apiRequest.onreadystatechange = function() {
         if (apiRequest.readyState == 4) {
           if (apiRequest.status == 200)
-            _call.resultProcessor(apiRequest);
+            _handler.resultProcessor(apiRequest);
           else
-            if (_call.errorProcessor)
-              _call.errorProcessor(apiRequest)
+            if (_handler.errorProcessor)
+              _handler.errorProcessor(apiRequest)
             else
               throw { 'code': apiRequest.status, 'message': 'request failed' }
         }
@@ -120,7 +123,7 @@ function RedditClient() {
       // this header is no longer forbidden per-spec
       // so it should work in the newest browser versions...
       apiRequest.setRequestHeader('User-Agent', "{{ user_agent }}");
-      apiRequest.setRequestHeader('Authorization', 'bearer '+_call_client.token);
+      apiRequest.setRequestHeader('Authorization', 'bearer '+_handler_client.token);
       if (requestData) {
         stringData = null
         if (typeof requestData === 'object') {
@@ -141,14 +144,22 @@ function RedditClient() {
       }
       // only send the request if the client has already been initiated
       // queue it for after the initiation succeeds otherwise
-      if (_call_client.initiating)
-        _call_client.push(apiRequest);
-      else
+      if (_handler_client.ready)
         apiRequest.sendWithData();
+      else
+        _handler_client.waiting_requests.push(apiRequest);
     }
+  }
+
+  // shorthand for calling requestResultHandler that enables this syntax:
+  //     authClient.call(myProcessinFunction).after(...);
+  this.call = function(resultProcessor, errorProcessor) {
+    return new requestResultHandler(resultProcessor, errorProcessor);
   }
 
   // let the backend know that there is an active client now
   // and obtain a valid bearer token from current login session
   this.refresh();
 }
+
+authClient = new AuthClient();
