@@ -5,6 +5,6 @@ env
 log
 data
 
-gunicorn.pid
+*.pid
 
 environment.sh
