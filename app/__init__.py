@@ -11,9 +11,6 @@ def not_found(error):
 from flask.ext.sqlalchemy import SQLAlchemy
 db = SQLAlchemy(rwh)
 
-from app.auth.util import start_periodic_cleanup
-start_periodic_cleanup(db)
-
 
 from app.auth.controllers import auth_blueprint
 rwh.register_blueprint(auth_blueprint)

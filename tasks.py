@@ -10,26 +10,26 @@ server = Collection('server')
 def start_server(pidfile=os.environ['GUNICORN_PID'],
                  config =os.environ['GUNICORN_CONF']):
     """
-    Starts gunicorn server daemon using given PID and config file.
+    Starts DB GC and gunicorn server using the given PID- and config file.
     """
     if os.path.isfile(pidfile):
         print("A PID file for running server was found at %s.\nIf server is not running, remove the stale PID file and try again." % pidfile)
     else:
         print("Starting gunicorn server... ")
-        gunicorn_cmd  = "gunicorn -D -p %s -c %s app:rwh" % (pidfile, config)
-        run(gunicorn_cmd)
+        gunicorn_start_cmd  = "gunicorn -D -p %s -c %s app:rwh" % (pidfile, config)
+        run(gunicorn_start_cmd)
 
 server.add_task(start_server, name='start')
 
 @task(help={'pid_file': 'PID file of the running gunicorn server'})
 def restart_server(pidfile=os.environ['GUNICORN_PID']):
     """
-    Restarts gunicorn server if it is running.
+    Restarts the DB GC and gunicorn server (if it is running).
     """
     if os.path.isfile(pidfile):
         print("Restarting gunicorn server... ")
-        restart_cmd = "kill -HUP `cat %s`" % pidfile
-        run(restart_cmd)
+        gunicorn_restart_cmd = "if [ -n {ps -efA | grep gunicorn | awk '{print $2}' | grep `cat %s`} ]; then kill -HUP `cat %s`; else echo 'Server not running. Remove stale PID file.'; fi" % (pidfile, pidfile)
+        run(gunicorn_restart_cmd)
     else:
         print("Could not find gunicorn PID file. Is server running?")
 
@@ -42,8 +42,8 @@ def stop_server(pidfile=os.environ['GUNICORN_PID']):
     """
     if os.path.isfile(pidfile):
         print("Stopping gunicorn server... ")
-        restart_cmd = "kill -TERM `cat %s`" % pidfile
-        run(restart_cmd)
+        gunicorn_stop_cmd = "if [ -n {ps -efA | grep gunicorn | awk '{print $2}' | grep `cat %s`} ]; then kill -TERM `cat %s`; else echo 'Server not running. Remove stale PID file.'; fi" % (pidfile, pidfile)
+        run(gunicorn_stop_cmd)
     else:
         print("Could not find gunicorn PID file. Is server running?")
 
