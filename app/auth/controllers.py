@@ -378,13 +378,14 @@ def active():
         return unauthenticated_response
 
 
-def revoke_token(login_session):
+def revoke_reddit_token(login_session):
     """
     Calls the OAuth2 server to manually revoke access for current bearer token.
     It should return status code 204 if everything goes well.
     The only argument is the LoginSession object that contains the token.
     
-    This call is used by the /auth/logout endpoint.
+    This call is used by the /auth/logout endpoint
+    and util.expire_old_sessions() periodic task.
     """
     token = login_session.token
     
@@ -412,7 +413,7 @@ def logout():
         login_session, session_id = get_login_session()
         if login_session:
             if (login_session.status == LoginSession.status_active):
-                revoke_status = revoke_token(login_session)
+                revoke_status = revoke_reddit_token(login_session)
                 if (revoke_status != 204):
                     revoke_failed_response = jsonify({'error': 'could not revoke token'})
                     # indicate error and refresh session and session_expires_in cookies

@@ -3,26 +3,62 @@ from multiprocessing import Process
 from signal import signal, getsignal, SIGTERM
 from time import sleep
 from sys import exit
-#from datetime import datetime, timedelta
 
 from sqlalchemy import desc, text
 
 from app.auth.models import LoginSession
+from app.auth.controllers import revoke_reddit_token
 from app import rwh
 
 
 def expire_old_sessions(db):
+    """
+    Finds all LoginSession in the Flask-SQLAlchemy DB (the only argument)
+    that are in the "status_open", but the "last_active" time is in the past
+    longer than the SESSION_DURATION, revokes their bearer token (reddit API)
+    and changes their status to "status_expired".
+    """
     session_duration = rwh.config['SESSION_DURATION']
-    #session_duration = int(os.environ['SESSION_DURATION'])
-    #expiration_date  = datetime.utcnow() - timedelta(seconds=session_duration)
     expired_sessions = LoginSession.query.order_by(desc(LoginSession.last_active)).filter(LoginSession.status == LoginSession.status_active).filter(LoginSession.last_active < text("NOW() - INTERVAL '%s seconds'" % session_duration))
     for login_session in expired_sessions:
-        login_session.status = LoginSession.status_expired
-        db.session.add(login_session)
-        db.session.commit()
+        revoke_status = revoke_reddit_token(login_session)
+        if (revoke_status == 201):
+            login_session.status = LoginSession.status_expired
+            db.session.add(login_session)
+            db.session.commit()
 
 
 def start_periodic_cleanup(db, main_process_pid=-1, slave=True, scheduler_process_pid=-1, interval=-1):
+    """
+    Starts a background process that takes care of expiring login sessions
+    that are inactive longer than the SESSION_DURATION interval.
+    The background process starts another child background process
+    to actually run the DB cleanup and then waits for the cleanup interval
+    (SESSION_DURATION / 2 + 1 seconds by default) before running it again.
+
+    The background process that is starting the cleanup task (scheduler)
+    writes the parent process PID into a file (set in the app configuration)
+    and sets a TERM signal handler that deletes the PID file
+    and terminates the scheduler when the parent process is properly terminated.
+    It also calls the original TERM signal handler not to interfere
+    with the parent process' default behavior.
+
+    The grand-child processes running the actual cleanup tasks are started
+    with the "deamon" flag set to "True", which means that the subprocess module
+    should attempt to terminate them when the scheduler process dies.
+
+    This call is designed to be called during the main app module __init__
+    which may be called from multiple processes (e.g. gunicorn workers) itself.
+    In this case a new scheduler process is started for each new parent
+    but they check for the existing PID file and if it is found they wait
+    until the first scheduler process (master) dies. Every slave scheduler
+    checks at different time (once per the cleanup interval) and if they see
+    that the PID file is missing (original master scheduler was terminated)
+    they write new pidfile with their parent process' PID and become new master.
+
+    The only argument that needs to be given is the Flask-SQLAlchemy DB
+    that will be passed to the expire_old_sessions() (periodically called task).
+    """
     gc_pidfile = rwh.config['DBGC_PID']
 
     def write_pidfile(filename, pid):
