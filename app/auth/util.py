@@ -1,7 +1,6 @@
-from os import getpid, path
+from os import getpid, path, remove
 from multiprocessing import Process
-from subprocess import call
-from signal import signal, SIGTERM
+from signal import signal, getsignal, SIGTERM
 from time import sleep
 from sys import exit
 #from datetime import datetime, timedelta
@@ -23,28 +22,38 @@ def expire_old_sessions(db):
         db.session.commit()
 
 
-def start_periodic_cleanup(db, main_process_pid=-1, scheduler_process_pid=-1, interval=-1):
+def start_periodic_cleanup(db, main_process_pid=-1, slave=True, scheduler_process_pid=-1, interval=-1):
     gc_pidfile = rwh.config['DBGC_PID']
+
+    def write_pidfile(filename, pid):
+        pidfile = open(filename, 'w')
+        print(pid, file=pidfile)
+        pidfile.close()
 
     main_pid = main_process_pid
     if (main_pid == -1):
-        if path.isfile(gc_pidfile):  # already running
-            return False
+        # if no other scheduler process is running (no PID file can be found)
+        # then the scheduler will start in master mode
+        if path.isfile(gc_pidfile):  # another scheduler is already running
+            is_slave = True
+        else:
+            is_slave = False
 
         main_pid = getpid()
-        scheduler_process = Process(target=start_periodic_cleanup, args=(db, main_pid), name='rwh auth/dbgc scheduler')
+        scheduler_process = Process(target=start_periodic_cleanup, args=(db, main_pid, is_slave), name='rwh auth/dbgc scheduler')
         scheduler_process.start()
 
         if scheduler_process.pid:
-            pidfile = open(gc_pidfile, 'w')
-            print(main_pid, file=pidfile)
-            pidfile.close()
+            write_pidfile(gc_pidfile, main_pid)
 
             # install term signal handler
-            def term_signal_handler(signal_number, current_frame):
+            original_term_signal_handler = getsignal(SIGTERM)
+            def new_term_signal_handler(signal_number, current_frame):
                 scheduler_process.terminate()
-                call("rm -f %s" % gc_pidfile, shell=True)
-            signal(SIGTERM, term_signal_handler)
+                remove(gc_pidfile)
+                if original_term_signal_handler:
+                    original_term_signal_handler()
+            signal(SIGTERM, new_term_signal_handler)
 
             return True
         else:
@@ -57,8 +66,30 @@ def start_periodic_cleanup(db, main_process_pid=-1, scheduler_process_pid=-1, in
 
         if (scheduler_process_pid == -1):
             scheduler_pid = getpid()
+
+            if slave:
+                # if the scheduler process was started in slave mode it will
+                # wait for the main (parent) process of current master to die
+                # and then it will take over running the periodic task(s)
+                # with parent process of this scheduler as the new main process
+                #
+                # there is always only one master scheduler process
+                # that takes care of running the periodic task
+                # and other scheduler processes (slaves) just sleep
+                # and keep checking if the PID file exists
+                #
+                # every slave process checks the PID file at different time
+                # and that time is based on the scheduler process PID
+                while True:
+                    initial_wait = (scheduler_pid - main_process_pid) % cleanup_interval
+                    sleep(initial_wait)
+                    if not path.isfile(gc_pidfile):
+                        write_pidfile(gc_pidfile, main_process_pid)
+                        break
+                    sleep(cleanup_interval - initial_wait)
+
             while True:
-                cleanup_run = Process(target=start_periodic_cleanup, args=(db, main_pid, scheduler_pid, cleanup_interval), name='rwh auth/dbgc task')
+                cleanup_run = Process(target=start_periodic_cleanup, args=(db, main_pid, False, scheduler_pid, cleanup_interval), name='rwh auth/dbgc task')
                 cleanup_run.daemon = True # = should be killed when parent dies
                 cleanup_run.start()
                 cleanup_run.join()
