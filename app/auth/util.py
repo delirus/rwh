@@ -62,11 +62,17 @@ def start_periodic_cleanup(db, main_process_pid=-1, slave=True, scheduler_proces
     gc_pidfile = rwh.config['DBGC_PID']
 
     def write_pidfile(filename, pid):
+        dbg = open("debug", "a")
+        print("in process %d writing pidfile" % getpid(), file=dbg)
+        dbg.close()
         pidfile = open(filename, 'w')
         print(pid, file=pidfile)
         pidfile.close()
 
     main_pid = main_process_pid
+    dbg = open("debug", "a")
+    print("in process %d - debug debug" % getpid(), file=dbg)
+    dbg.close()
     if (main_pid == -1):
         # if no other scheduler process is running (no PID file can be found)
         # then the scheduler will start in master mode
@@ -76,8 +82,11 @@ def start_periodic_cleanup(db, main_process_pid=-1, slave=True, scheduler_proces
             is_slave = False
 
         main_pid = getpid()
-        scheduler_process = Process(target=start_periodic_cleanup, args=(db, main_pid, is_slave), name='rwh auth/dbgc scheduler')
+        scheduler_process = Process(target=start_periodic_cleanup, args=(db, main_pid, is_slave), name='rwh auth/db-gc scheduler')
         scheduler_process.start()
+        dbg = open("debug", "a")
+        print("in process %d, started scheduler %d" % (main_pid, scheduler_process.pid), file=dbg)
+        dbg.close()
 
         if scheduler_process.pid:
             write_pidfile(gc_pidfile, main_pid)
@@ -85,10 +94,16 @@ def start_periodic_cleanup(db, main_process_pid=-1, slave=True, scheduler_proces
             # install term signal handler
             original_term_signal_handler = getsignal(SIGTERM)
             def new_term_signal_handler(signal_number, current_frame):
+                dbg = open("debug", "a")
+                print("got TERM signal in process %d, terminating scheduler %d" % (getpid(), scheduler_process.pid), file=dbg)
+                dbg.close()
                 scheduler_process.terminate()
-                remove(gc_pidfile)
+                try:
+                    remove(gc_pidfile)
+                except FileNotFoundError:
+                    pass
                 if original_term_signal_handler:
-                    original_term_signal_handler()
+                    original_term_signal_handler(signal_number, current_frame)
             signal(SIGTERM, new_term_signal_handler)
 
             return True
@@ -101,6 +116,13 @@ def start_periodic_cleanup(db, main_process_pid=-1, slave=True, scheduler_proces
             cleanup_interval = interval
 
         if (scheduler_process_pid == -1):
+            def scheduler_term_signal_handler(signal_number, current_frame):
+                dbg = open("debug", "a")
+                print("got TERM signal in scheduler %d" % getpid(), file=dbg)
+                dbg.close()
+                exit(0)
+            signal(SIGTERM, scheduler_term_signal_handler)
+
             scheduler_pid = getpid()
 
             if slave:
@@ -125,13 +147,19 @@ def start_periodic_cleanup(db, main_process_pid=-1, slave=True, scheduler_proces
                     sleep(cleanup_interval - initial_wait)
 
             while True:
-                cleanup_run = Process(target=start_periodic_cleanup, args=(db, main_pid, False, scheduler_pid, cleanup_interval), name='rwh auth/dbgc task')
+                cleanup_run = Process(target=start_periodic_cleanup, args=(db, main_pid, False, scheduler_pid, cleanup_interval), name='rwh auth/db-gc task')
                 cleanup_run.daemon = True # = should be killed when parent dies
                 cleanup_run.start()
+                dbg = open("debug", "a")
+                print("in scheduler %d, started task process %d" % (getpid(), cleanup_run.pid), file=dbg)
+                dbg.close()
                 cleanup_run.join()
 
                 sleep(cleanup_interval)
         else:
+            dbg = open("debug", "a")
+            print("in task %d" % getpid(), file=dbg)
+            dbg.close()
             expire_old_sessions(db)
             exit(0)
 
