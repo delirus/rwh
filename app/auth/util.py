@@ -4,7 +4,7 @@ from signal import signal, getsignal, SIGTERM
 from time import sleep
 from sys import exit
 
-from sqlalchemy import desc, text
+from sqlalchemy import desc, text, or_
 
 from app.auth.models import LoginSession
 from app.auth.controllers import revoke_reddit_token
@@ -19,10 +19,10 @@ def expire_old_sessions(db):
     and changes their status to "status_expired".
     """
     session_duration = rwh.config['SESSION_DURATION']
-    expired_sessions = LoginSession.query.order_by(desc(LoginSession.last_active)).filter(LoginSession.status == LoginSession.status_active).filter(LoginSession.last_active < text("NOW() - INTERVAL '%s seconds'" % session_duration))
+    expired_sessions = db.session.query(LoginSession).order_by(desc(LoginSession.last_active)).filter(LoginSession.last_active < text("(NOW() - (INTERVAL '%s seconds'))" % session_duration)).filter(or_(LoginSession.status == text("'%s'" % LoginSession.status_active), LoginSession.status == text("'%s'" % LoginSession.status_initiating))).all()
     for login_session in expired_sessions:
         revoke_status = revoke_reddit_token(login_session)
-        if (revoke_status == 201):
+        if (revoke_status == 204):
             login_session.status = LoginSession.status_expired
             db.session.add(login_session)
             db.session.commit()

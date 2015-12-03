@@ -65,7 +65,7 @@ function AuthClient() {
   // the parameters are the callback function
   // and error processing function to called if the API request fails
   // if the error processing function is omitted, an error is thrown instead
-  this.requestResultHandler = function(resultProcessor, errorProcessor) {
+  this.requestResultHandler = function(resultProcessor) {
     var _handler = this;
     var _handler_client = _client;
 
@@ -74,16 +74,12 @@ function AuthClient() {
     else
       throw { 'code': null, 'message': 'missing result processor argument' };
 
-    if (typeof resultProcessor !== 'undefined')
-      this.errorProcessor = errorProcessor;
-    else
-      this.errorProcessor = null;
-
     // perfrorms the query to the Reddit API using the current bearer token
-    // taken from the grandmother RedditClient class instance
-    // and calls the callback set on the mother RedditClient.call instance when the result is due
-    // if the errorProcessor function was set on the RedditClient.call instance
-    // then this will be called in case the HTTP status code from the API call is not 200
+    // taken from the grandmother AuthClient class instance
+    // and calls the callback set in the mother AuthClient.requestResultHandler
+    // when the result is due
+    // it is up to the resultProcessor function to check the status
+    // and handle error
     this.after = function(httpMethod, apiPath, requestData) {
       if (typeof httpMethod !== 'undefined')
         this.httpMethod = httpMethod;
@@ -110,13 +106,7 @@ function AuthClient() {
       var apiRequest = new XMLHttpRequest();
       apiRequest.onreadystatechange = function() {
         if (apiRequest.readyState == 4) {
-          if (apiRequest.status == 200)
-            _handler.resultProcessor(apiRequest);
-          else
-            if (_handler.errorProcessor)
-              _handler.errorProcessor(apiRequest)
-            else
-              throw { 'code': apiRequest.status, 'message': 'request failed' }
+          _handler.resultProcessor(apiRequest);
         }
       }
       apiRequest.open(httpMethod, 'https://oauth.reddit.com'+apiPath, true);
@@ -133,10 +123,10 @@ function AuthClient() {
         else {
           stringData = requestData.toString();
         }
-        apiRequest.redditRequestData = stringData;
+        apiRequest.apiRequestData = stringData;
         apiRequest.setRequestHeader('Content-Length', stringData.length);
         apiRequest.sendWithData = function() {
-          send(redditRequestData);
+          send(apiRequestData);
         }
       }
       else {
@@ -153,8 +143,8 @@ function AuthClient() {
 
   // shorthand for calling requestResultHandler that enables this syntax:
   //     authClient.call(myProcessinFunction).after(...);
-  this.call = function(resultProcessor, errorProcessor) {
-    return new requestResultHandler(resultProcessor, errorProcessor);
+  this.call = function(resultProcessor) {
+    return new requestResultHandler(resultProcessor);
   }
 
   // let the backend know that there is an active client now

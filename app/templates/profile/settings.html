@@ -10,18 +10,20 @@
 
 
 <script src="/reddit/client.js"></script>
-<script>
-redditClient = new RedditClient();
 
-function setUsernameValue(returnedRedditData) {
-  personalInfo = JSON.parse(returnedRedditData.responseText);
-  document.getElementById("username").innerHTML = personalInfo.name;
+<script>
+function setUsernameValue(requestResult) {
+  if (requestResult.status == 200) {
+    personalInfo = JSON.parse(returnedRedditData.responseText);
+    document.getElementById("username").innerHTML = personalInfo.name;
+  }
+  else {
+    document.getElementById("username").innerHTML = "error: "+requestResult.status
+  }
 }
 
-updateUsername = new redditClient.call(setUsernameValue);
-
 function loadUsername() {
-  updateUsername.after('GET', '/api/v1/me');
+  authClient.call(setUsernameValue).after('GET', '/api/v1/me');
 }
 </script>
 
