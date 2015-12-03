@@ -28,7 +28,7 @@ def expire_old_sessions(db):
             db.session.commit()
 
 
-def start_periodic_cleanup(db, main_process_pid=-1, slave=True, scheduler_process_pid=-1, interval=-1):
+def start_periodic_cleanup(db, main_process_pid=-1, master=False, scheduler_process_pid=-1, interval=-1):
     """
     Starts a background process that takes care of expiring login sessions
     that are inactive longer than the SESSION_DURATION interval.
@@ -60,37 +60,32 @@ def start_periodic_cleanup(db, main_process_pid=-1, slave=True, scheduler_proces
     that will be passed to the expire_old_sessions() (periodically called task).
     """
     gc_pidfile = rwh.config['DBGC_PID']
+    is_master = master
 
     def write_pidfile(filename, pid):
         pidfile = open(filename, 'w')
         print(pid, file=pidfile)
         pidfile.close()
+        is_master = True
 
     main_pid = main_process_pid
     if (main_pid == -1):
-        # if no other scheduler process is running (no PID file can be found)
-        # then the scheduler will start in master mode
-        if path.isfile(gc_pidfile):  # another scheduler is already running
-            is_slave = True
-        else:
-            is_slave = False
 
         main_pid = getpid()
-        scheduler_process = Process(target=start_periodic_cleanup, args=(db, main_pid, is_slave), name='rwh auth/db-gc scheduler')
+        scheduler_process = Process(target=start_periodic_cleanup, args=(db, main_pid, is_master), name='rwh auth/db-gc scheduler')
         scheduler_process.start()
 
         if scheduler_process.pid:
-            if (not is_slave):
+            # if no other scheduler process is running
+            # (no PID file can be found) then new PID file is written
+            # and the scheduler will start in master mode
+            if (not path.isfile(gc_pidfile)):
                 write_pidfile(gc_pidfile, main_pid)
 
             # install term signal handler
             original_term_signal_handler = getsignal(SIGTERM)
             def new_term_signal_handler(signal_number, current_frame):
                 scheduler_process.terminate()
-                try:
-                    remove(gc_pidfile)
-                except FileNotFoundError:
-                    pass
                 if original_term_signal_handler:
                     original_term_signal_handler(signal_number, current_frame)
             signal(SIGTERM, new_term_signal_handler)
@@ -106,24 +101,26 @@ def start_periodic_cleanup(db, main_process_pid=-1, slave=True, scheduler_proces
 
         if (scheduler_process_pid == -1):
             def scheduler_term_signal_handler(signal_number, current_frame):
+                if is_master:
+                    remove(gc_pidfile)
                 exit(0)
             signal(SIGTERM, scheduler_term_signal_handler)
 
             scheduler_pid = getpid()
 
-            if slave:
-                # if the scheduler process was started in slave mode it will
-                # wait for the main (parent) process of current master to die
-                # and then it will take over running the periodic task(s)
-                # with parent process of this scheduler as the new main process
-                #
+            if (not is_master):
                 # there is always only one master scheduler process
                 # that takes care of running the periodic task
                 # and other scheduler processes (slaves) just sleep
                 # and keep checking if the PID file exists
                 #
+                # if the scheduler process was started in slave mode it will
+                # wait for the main (parent) process of current master to die
+                # (and deletes the PID file in the process) and then takes over
+                # running the periodic task and becomes new master
+                #
                 # every slave process checks the PID file at different time
-                # and that time is based on the scheduler process PID
+                # that is based on the scheduler process PID
                 while True:
                     initial_wait = (scheduler_pid - main_process_pid) % cleanup_interval
                     sleep(initial_wait)
@@ -133,7 +130,7 @@ def start_periodic_cleanup(db, main_process_pid=-1, slave=True, scheduler_proces
                     sleep(cleanup_interval - initial_wait)
 
             while True:
-                cleanup_run = Process(target=start_periodic_cleanup, args=(db, main_pid, False, scheduler_pid, cleanup_interval), name='rwh auth/db-gc task')
+                cleanup_run = Process(target=start_periodic_cleanup, args=(db, main_pid, None, scheduler_pid, cleanup_interval), name='rwh auth/db-gc task')
                 cleanup_run.daemon = True # = should be killed when parent dies
                 cleanup_run.start()
                 cleanup_run.join()

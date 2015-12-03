@@ -35,7 +35,7 @@ function AuthClient() {
           // so the value of the "session_expires_in" cookie is now valid
           _client.sessionExpiration = Date.now() + 1000*parseInt(getCookie('session_expires_in'));
 
-          _client.ready = false;
+          _client.ready = true;
           // process requests that were issued before the client was initiated
           number_of_waiting_requests = _client.waiting_requests.length;
           if (number_of_waiting_requests > 0) {
@@ -144,7 +144,7 @@ function AuthClient() {
   // shorthand for calling requestResultHandler that enables this syntax:
   //     authClient.call(myProcessinFunction).after(...);
   this.call = function(resultProcessor) {
-    return new requestResultHandler(resultProcessor);
+    return new _client.requestResultHandler(resultProcessor);
   }
 
   // let the backend know that there is an active client now
