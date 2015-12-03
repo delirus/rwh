@@ -8,7 +8,7 @@ export DB_HOST="db_host"
 export DB_NAME="db_name"
 export DB_USER="db_user"
 export DB_PASS="db_password"
-export DBGC_PID="dbgc.pid" # DB garbage collector PID file
+export DBGC_PID="db-gc.pid" # DB garbage collector PID file
 
 export SESSION_KEY="secret_key_1"
 export COOKIES_KEY="secret_key_2"
