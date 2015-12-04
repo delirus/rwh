@@ -9,7 +9,7 @@ class LoginSession(db.Model):
 
     id            = db.Column(db.String(36), primary_key=True)
     status        = db.Column(db.String(10))
-    username      = db.Column(db.String(256), default=None)
+    username      = db.Column(db.String(65), default=None)
     token         = db.Column(db.String(36), default=None)
     token_expires = db.Column(db.DateTime, default=None)
     refresh_token = db.Column(db.String(36), default=None)

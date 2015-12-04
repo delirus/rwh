@@ -7,7 +7,8 @@ utcnow = datetime.utcnow
 from urllib.parse import urlencode
 from urllib.request import Request as client_http_request
 from urllib.request import HTTPBasicAuthHandler as http_basic_auth_handler
-from urllib.request import build_opener
+from urllib.request import build_opener, urlopen
+from hashlib import sha256
 from flask import Blueprint, request, session, make_response, render_template, flash, redirect, url_for, jsonify
 
 from app import db, rwh
@@ -141,6 +142,27 @@ def obtain_token(login_session, authorization_code):
     return status_code
 
 
+def get_reddit_username(login_session):
+    username_request = client_http_request('https://oauth.reddit.com/api/v1/me',
+                                           method='GET')
+    username_request.add_header('User-Agent', rwh.config['APP_USER_AGENT_SERVER'])
+    username_request.add_header('Authorization', "bearer %s" % login_session.token)
+    response = urlopen(username_request)
+
+    http_status = response.getcode()
+    response_body = response.read().decode('utf-8')
+    if ((http_status == 200) and (len(response_body.strip()) > 0)):
+        response_data = json.loads(response_body)
+
+        username = response_data['name'] 
+
+        hash_function = sha256()
+        hash_function.update(username.encode('utf-8'))
+
+        return hash_function.hexdigest()
+    else:
+        return None
+
 @auth_blueprint.route('/login', strict_slashes=False)
 def reddit_login():
     """
@@ -197,6 +219,24 @@ def reddit_login():
                 status_code = obtain_token(login_session, code)
 
                 if (status_code == 200):
+                    username = get_reddit_username(login_session)
+                    if username:
+                        login_session.username = username
+                    else:
+                        login_session.status = LoginSession.status_failed
+                        db.session.add(login_session)
+                        db.session.commit()
+                        
+                        flash('could not get username using retrieved bearer token')
+                        initiation_failed_response = make_response(render_template('auth/login_error.html'))
+                        if ('session_id') in session:
+                            session.pop('session_id')
+                        initiation_failed_response.set_cookie('session_expires_in', '-1', expires=0)
+
+                        initiation_failed_response.status_code = status_code
+
+                        return initiation_failed_response
+
                     # Bearer token successfully retrieved.
                     # Redirect user to the URL specified by the redirect_url
                     # cookie or the default URL (app root)
