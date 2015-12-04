@@ -21,11 +21,13 @@ def expire_old_sessions(db):
     session_duration = rwh.config['SESSION_DURATION']
     expired_sessions = db.session.query(LoginSession).order_by(desc(LoginSession.last_active)).filter(LoginSession.last_active < text("(NOW() - (INTERVAL '%s seconds'))" % session_duration)).filter(or_(LoginSession.status == text("'%s'" % LoginSession.status_active), LoginSession.status == text("'%s'" % LoginSession.status_initiating))).all()
     for login_session in expired_sessions:
+        login_session.status = LoginSession.status_expired
+        db.session.add(login_session)
+        db.session.commit()
+
         revoke_status = revoke_reddit_token(login_session)
-        if (revoke_status == 204):
-            login_session.status = LoginSession.status_expired
-            db.session.add(login_session)
-            db.session.commit()
+        if (revoke_status != 204):
+            pass # TODO - log error
 
 
 def start_periodic_cleanup(db, main_process_pid=-1, master=False, scheduler_process_pid=-1, interval=-1):
