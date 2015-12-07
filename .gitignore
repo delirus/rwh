@@ -1,4 +1,6 @@
 __pycache__
+app/static/gen
+app/static/.webassets-cache
 
 env
 

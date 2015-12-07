@@ -22,5 +22,18 @@ from app.profile.controllers import profile_blueprint
 rwh.register_blueprint(profile_blueprint)
 
 
+from flask.ext.assets import Bundle, Environment
+bundles = {
+    'error_css': Bundle('css/basic.css',
+                        'css/error.css',
+                        output='gen/error.css'),
+    'error_js': Bundle('js/error.js',
+                       output='gen/error.js')
+}
+
+assets = Environment(rwh)
+assets.register(bundles)
+
+
 if __name__ == '__main__':
     rwh.run()

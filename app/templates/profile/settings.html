@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <html>
+<head> 
+  {% assets "error_css" %}
+    <link rel="stylesheet" href="{{ ASSET_URL }}" />
+  {% endassets %} 
+  {% assets "error_js" %}
+    <script src="{{ ASSET_URL }}"></script>
+  {% endassets %} 
+</head>
 <body>
 
 <h2>Profile</h2>
@@ -18,12 +26,18 @@ function setUsernameValue(requestResult) {
     document.getElementById("username").innerHTML = personalInfo.name;
   }
   else {
-    document.getElementById("username").innerHTML = "error: "+requestResult.status
+    errorMessage = "API request returned error "+requestResult.status;
+    showError({'message': errorMessage});
   }
 }
 
 function loadUsername() {
-  authClient.call(setUsernameValue).after('GET', '/api/v1/me');
+  try {
+    authClient.call(setUsernameValue).after('GET', '/api/v1/me');
+  }
+  catch (error) {
+    showError(error);
+  }
 }
 </script>
 
