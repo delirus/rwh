@@ -1,5 +1,5 @@
 .errorOverlay{
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   width: 100%;
@@ -10,7 +10,7 @@
 .modalError {
   width: 300px;
   height: 200px;
-  line-height: 200px;
+  line-height: 100px;
   position: fixed;
   top: 50%; 
   left: 50%;
