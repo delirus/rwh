@@ -1,4 +1,4 @@
-export APP_SETTINGS="app_config.Production"
+export APP_SETTINGS="app.config.Production"
 
 export APP_ID="reddit_app_id"
 export APP_URL="https://aoiy.eu/rwh" # excluding redirect_uri path (auth/login)

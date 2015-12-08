@@ -9,4 +9,4 @@ data
 
 *.pid
 
-environment.sh
+rwh_environment.sh
