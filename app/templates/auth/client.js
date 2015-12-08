@@ -149,7 +149,11 @@ function AuthClient() {
 
   // let the backend know that there is an active client now
   // and obtain a valid bearer token from current login session
+  // and the session validity duration cookie
   this.refresh();
+  
+  // refresh session at least three times before it expires
+  this.heartbeat = setInterval(this.refresh, 333*parseInt(getCookie('session_expires_in')));
 }
 
 authClient = new AuthClient();
