@@ -1,9 +1,8 @@
 import uuid
 import json
 from datetime import timedelta
-from datetime import datetime 
-utc = datetime.utcfromtimestamp
-utcnow = datetime.utcnow
+from datetime import datetime
+from pytz import utc
 from urllib.parse import urlencode
 from urllib.request import Request as client_http_request
 from urllib.request import HTTPBasicAuthHandler as http_basic_auth_handler
@@ -14,6 +13,10 @@ from flask import Blueprint, request, session, make_response, render_template, f
 from app import db, rwh
 
 from app.auth.models import LoginSession
+
+
+def utcnow():
+    return datetime.now(tz=utc)
 
 
 """

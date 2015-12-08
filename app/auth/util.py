@@ -68,36 +68,39 @@ def start_periodic_cleanup(db, main_process_pid=-1, master=False, scheduler_proc
         pidfile = open(filename, 'w')
         print(pid, file=pidfile)
         pidfile.close()
-        is_master = True
 
     main_pid = main_process_pid
     if (main_pid == -1):
-
+        # we get here when this function have been called from the main process
         main_pid = getpid()
+
+        # if no other scheduler process is running
+        # (no PID file can be found) then new PID file is written
+        # and the scheduler will start in master mode
+        if (not path.isfile(gc_pidfile)):
+            write_pidfile(gc_pidfile, main_pid)
+            is_master = True
+
         scheduler_process = Process(target=start_periodic_cleanup, args=(db, main_pid, is_master), name='rwh auth/db-gc scheduler')
         scheduler_process.start()
 
         if scheduler_process.pid:
-            # if no other scheduler process is running
-            # (no PID file can be found) then new PID file is written
-            # and the scheduler will start in master mode
-            if (not path.isfile(gc_pidfile)):
-                write_pidfile(gc_pidfile, main_pid)
-
-            # install term signal handler
+            # install new TERM signal handler
+            # that will first terminate the new scheduler process and then
+            # either call existing TERM signal handler or exit gracefully
             original_term_signal_handler = getsignal(SIGTERM)
             def new_term_signal_handler(signal_number, current_frame):
                 scheduler_process.terminate()
                 if original_term_signal_handler:
                     original_term_signal_handler(signal_number, current_frame)
+                else:
+                    exit(0)
             signal(SIGTERM, new_term_signal_handler)
 
-            return True
-        else:
-            return False
+        return is_master
     else:
         if (interval == -1):
-            cleanup_interval = (int(rwh.config['SESSION_DURATION']) / 2) + 1
+            cleanup_interval = (int(rwh.config['SESSION_DURATION']) / 10) + 1
         else:
             cleanup_interval = interval
 
@@ -124,10 +127,15 @@ def start_periodic_cleanup(db, main_process_pid=-1, master=False, scheduler_proc
                 # every slave process checks the PID file at different time
                 # that is based on the scheduler process PID
                 while True:
+                    # the initial_wait period should be different
+                    # for processes with different PID's
+                    # so that different schedulers will not attempt
+                    # to access the PID file at the same time
                     initial_wait = (scheduler_pid - main_process_pid) % cleanup_interval
                     sleep(initial_wait)
                     if (not path.isfile(gc_pidfile)):
                         write_pidfile(gc_pidfile, main_process_pid)
+                        is_master = True
                         break
                     sleep(cleanup_interval - initial_wait)
 
