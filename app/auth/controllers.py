@@ -66,15 +66,20 @@ def authenticated(call):
 
 
 @auth_blueprint.route('/client.js')
-@authenticated
 def client_js():
     """
     Renders the client JS code that deals with Reddit API.
     This is not static since it may contain parts that depend on the app config.
     """
+    login_session, session_id = get_login_session()
+
     user_agent_string = rwh.config['APP_USER_AGENT_CLIENT']
     app_url_string    = rwh.config['APP_URL']
-    return render_template('auth/client.js', user_agent=user_agent_string, app_url=app_url_string)
+    
+    return render_template('auth/client.js',
+                           session    = session_id,
+                           user_agent = user_agent_string,
+                           app_url    = app_url_string)
 
 
 def token_request(uri, post_data):
@@ -360,6 +365,13 @@ def refresh_token(login_session):
     return status_code
 
 
+def verirfy_csrf_token(login_session, request):
+    expected_token = login_session.id
+    provided_token = request.headers.get('X-Csrf-Token')
+
+    return (expected_token == provided_token)
+
+
 @auth_blueprint.route('/active', strict_slashes=False)
 def active():
     """
@@ -380,6 +392,12 @@ def active():
     """
     login_session, session_id = get_login_session()
     if login_session and (login_session.status == LoginSession.status_active):
+        if (not verify_csrf_token(login_session, request)):
+            invalid_token_response = jsonify({'error': 'bad csrf token'})
+            invalid_token_response.status_code = 403
+
+            return invalid_token_response
+        
         time_now = utcnow()
         login_session.last_active = time_now
 
@@ -456,6 +474,12 @@ def logout():
         login_session, session_id = get_login_session()
         if login_session:
             if (login_session.status == LoginSession.status_active):
+                if (not verify_csrf_token(login_session, request)):
+                    invalid_token_response = jsonify({'error': 'bad csrf token'})
+                    invalid_token_response.status_code = 403
+
+                    return invalid_token_response
+
                 revoke_status = revoke_reddit_token(login_session)
                 if (revoke_status != 204):
                     revoke_failed_response = jsonify({'error': 'could not revoke token'})
