@@ -8,8 +8,8 @@ function AuthClient() {
   var sessionSecret = "{{ session_secret }}";
 
   var sessionStatus = 'uninitialized';
-  this.isReady = function() {
-    return (sessionStatus == 'active');
+  this.getSessionStatus = function() {
+    return sessionStatus;
   }
 
   // extracts the value of a cookie with the given name
@@ -92,6 +92,10 @@ function AuthClient() {
 
   // logs out the current login session
   this.logout = function() {
+    sessionStatus = 'unlogged';
+
+    clearInterval(_client.heartbeat);
+
     var logoutRequest = new XMLHttpRequest();
     logoutRequest.onreadystatechange = function() {
       if (logoutRequest.readyState == 4 ) {
@@ -134,7 +138,7 @@ function AuthClient() {
     else
       throw { 'code': null, 'message': 'missing result processor argument' };
     
-    var clientIsReady = _client.isReady;
+    var sessionStatus = _client.getSessionStatus;
     var refreshClient = _client.refresh;
 
     var clientWaitingRequests   = waitingRequests;
@@ -177,7 +181,7 @@ function AuthClient() {
 
       var time_now = Date.now();
 
-      if (clientIsReady()) {
+      if (sessionStatus() === 'active') {
         if (time_now > clientSessionExpiration())
           throw { 'code': null, 'message': 'login session expired' };
 
@@ -222,10 +226,12 @@ function AuthClient() {
       }
       // only send the request if the client has already been initiated
       // queue it for after the initiation succeeds otherwise
-      if (clientIsReady())
+      if (sessionStatus() === 'active')
         apiRequest.sendWithData();
-      else
+      else if (sessionStatus() === 'verifying')
         clientWaitingRequests.push(apiRequest);
+      else
+        throw {'code': null, 'error': 'inactive login session'}
     }
   }
 

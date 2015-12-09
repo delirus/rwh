@@ -25,14 +25,18 @@ function dismissError(errorId) {
   }
 }
 
-function showError(error) {
+function showError(exception) {
   errorWindow = document.createElement('div');
   errorId = uuid4();
   errorWindow.id = errorId;
   errorWindow.className = 'modalError';
   
   errorMessage = document.createElement('div');
-  errorMessage.innerHTML = error.message;
+  messageText = exception.error
+  if (exception.code)
+    messageText = exception.code + ": " + messageText
+  errorMessage.innerHTML = messageText;
+
   errorWindow.appendChild(errorMessage);
   
   dismissButton = document.createElement('button');
