@@ -365,11 +365,30 @@ def refresh_token(login_session):
     return status_code
 
 
-def verirfy_csrf_token(login_session, request):
+def verify_request(login_session, request):
+    """
+    Checks that the request contains the 'X-Csrf-Token' header
+    and that the value matches with the current session ID.
+    This value is rendered as private javascript variable in the client.js
+    and should be sent by the client with every request
+    to /auth/active and /auth/logout.
+
+    Moreover, it checks that the 'Referer' header starts with the app URL.
+    This way only an AuthClient instance defined in client.js file
+    which was included from one of the app pages can properly make requests
+    to the /auth/active or /auth/logout endpoints from the user's browser.
+
+    The arguments are the active login_session object and the (Flask) request.
+
+    It returns True if the referrer is allowed and CSRF token checks out,
+    False otherwise.
+    """
+    referer_header = request.headers.get('Referer')
+
     expected_token = login_session.id
     provided_token = request.headers.get('X-Csrf-Token')
 
-    return (expected_token == provided_token)
+    return ((expected_token == provided_token) and referer_header.startswith(rwh.config['APP_URL']))
 
 
 @auth_blueprint.route('/active', strict_slashes=False)
@@ -392,8 +411,8 @@ def active():
     """
     login_session, session_id = get_login_session()
     if login_session and (login_session.status == LoginSession.status_active):
-        if (not verify_csrf_token(login_session, request)):
-            invalid_token_response = jsonify({'error': 'bad csrf token'})
+        if (not verify_request(login_session, request)):
+            invalid_token_response = jsonify({'error': 'request not authorized'})
             invalid_token_response.status_code = 403
 
             return invalid_token_response
@@ -474,8 +493,8 @@ def logout():
         login_session, session_id = get_login_session()
         if login_session:
             if (login_session.status == LoginSession.status_active):
-                if (not verify_csrf_token(login_session, request)):
-                    invalid_token_response = jsonify({'error': 'bad csrf token'})
+                if (not verify_request(login_session, request)):
+                    invalid_token_response = jsonify({'error': 'request not authorized'})
                     invalid_token_response.status_code = 403
 
                     return invalid_token_response

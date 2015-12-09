@@ -74,13 +74,15 @@ function AuthClient() {
             }
           }
         }
-        else if (Math.floor(logoutRequest.status / 100) != 5)
+        else if (Math.floor(sessionStatusRequest.status / 100) != 5) {
           jsonErrorResponse = JSON.parse(sessionStatusRequest.responseText);
           jsonErrorResponse.code = sessionStatusRequest.status;
           throw jsonErrorResponse;
-        else
+        }
+        else {
           throw { 'code': sessionStatusRequest.status,
                   'message': 'server error' };
+        }
       }
     };
     sessionStatusRequest.open("GET", "{{ app_url }}/auth/active", true);
@@ -101,9 +103,11 @@ function AuthClient() {
           jsonErrorResponse = JSON.parse(logoutRequest.responseText);
           jsonErrorResponse.code = logoutRequest.status;
           throw jsonErrorResponse;
-        else
+        }
+        else {
           throw { 'code': logoutRequest.status,
                   'message': 'server error' };
+        }
       }
     };
     sessionStatusRequest.open("GET", "{{ app_url }}/auth/logout", true);
