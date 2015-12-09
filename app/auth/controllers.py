@@ -94,11 +94,15 @@ def request_is_authorized(login_session, request):
     than the clean @authorized decorator used for other calls.
     """
     referer_header = request.headers.get('Referer')
+    correct_referer = False
+    if request.headers.get('Referer'):
+        if request.headers.get('Referer').startswith(rwh.config['APP_URL']):
+            correct_referer = True
 
     expected_token = login_session.secret
     provided_token = request.headers.get('X-Session-Secret')
 
-    return ((expected_token == provided_token) and referer_header.startswith(rwh.config['APP_URL']))
+    return ((expected_token == provided_token) and correct_referer)
 
 
 def authorized(call):
@@ -178,7 +182,11 @@ def client_js():
 
         return not_logged_in_response
 
-    if ((not request.headers.get('Referer').startswith(rwh.config['APP_URL'])) or (login_session.status != LoginSession.status_active)):
+    correct_referer = False
+    if request.headers.get('Referer'):
+        if request.headers.get('Referer').startswith(rwh.config['APP_URL']):
+            correct_referer = True
+    if ((not correct_referer) or (login_session.status != LoginSession.status_active)):
         not_authorized_response = jsonify({'error': 'unauthorized request'})
         not_authorized_response.status_code = 403
 
@@ -480,7 +488,7 @@ def active():
     This is API only endpoint that should be called regulary (e.g. with AJAX)
     by any @authenticated page that wishes to maintain the login session.
     It returns JSON object with the session secret, status, (reddit) API token
-    expiration times in seconds for the session and the token.
+    and expiration times in seconds for the session and the token.
 
     A client that wishes to make request to the Reddit API after the time
     of the token expiration should call this endpoint first.
@@ -496,56 +504,66 @@ def active():
     will have to log in again and re-authorize the app.
 
     If the request is not successfull, the relevant cookies will be unset
-    so that the client doesn't make the same errornous request again.
+    so that the client does not make the same errornous request again.
     """
     login_session, session_id = get_login_session()
 
-    if login_session and (login_session.status == LoginSession.status_active):
-        if (not request_is_authorized(login_session, request)):
-            invalid_token_response = jsonify({'error': 'unauthorized request'})
-            invalid_token_response.status_code = 403
-
-            return invalid_token_response
-        
-        time_now = utcnow()
-        login_session.last_active = time_now
-
-        status_code = 200
-        if (time_now > login_session.token_expires):
-            status_code = refresh_token(login_session)
-
-        db.session.add(login_session)
-        db.session.commit()
-
-        session['session_id'] = session_id
-        session_expires_in    = rwh.config['SESSION_DURATION']
-
-        if (status_code == 200):
-            token_expires_in = int(login_session.token_expires.strftime('%s')) - int(utcnow().strftime('%s')) 
-            session_refreshed_response = jsonify({'session_secret': login_session.secret,
-                                                  'session_status': LoginSession.status_active,
-                                                  'token': login_session.token,
-                                                  'token_expires_in': token_expires_in})
-            session_refreshed_response.set_cookie('session_expires_in', session_expires_in)
-            session_refreshed_response.status_code = 200
-
-            return session_refreshed_response
-        else:
-            # report error but give the client a chance to try again later
-            refresh_failed_response = jsonify({'error': 'could not refresh token'})
-            session['session_id'] = session_id
-            refresh_failed_response.set_cookie('session_expires_in', session_expires_in)
-            refresh_failed_response.status_code = status_code
-            
-            return refresh_failed_response
-    else:
+    if (not session_id):
         unauthenticated_response = jsonify({'error': 'not logged in'})
-        if ('session_id') in session:
-            session.pop('session_id')
         unauthenticated_response.set_cookie('session_expires_in', '-1', expires=0)
         unauthenticated_response.status_code = 401
 
         return unauthenticated_response
+
+    if (login_session and (login_session.status != LoginSession.status_active)):
+        invalid_session_response = jsonify({'error': 'invalid_session'})
+
+        if ('session_id') in session:
+            session.pop('session_id')
+        invalid_session_response.set_cookie('session_expires_in', '-1', expires=0)
+
+        invalid_session_response.status_code = 401
+
+        return invalid_session_response
+
+    if (not request_is_authorized(login_session, request)):
+        invalid_token_response = jsonify({'error': 'unauthorized request'})
+        invalid_token_response.status_code = 403
+
+        return invalid_token_response
+    
+    time_now = utcnow()
+    login_session.last_active = time_now
+
+    status_code = 200
+    if (time_now > login_session.token_expires):
+        status_code = refresh_token(login_session)
+
+    db.session.add(login_session)
+    db.session.commit()
+
+    session['session_id'] = session_id
+    session_expires_in    = rwh.config['SESSION_DURATION']
+
+    if (status_code == 200):
+        token_expires_in = int(login_session.token_expires.strftime('%s')) - int(utcnow().strftime('%s')) 
+        session_refreshed_response = jsonify({'session_secret': login_session.secret,
+                                              'session_status': LoginSession.status_active,
+                                              'token': login_session.token,
+                                              'token_expires_in': token_expires_in})
+        session_refreshed_response.set_cookie('session_expires_in', session_expires_in)
+        session_refreshed_response.status_code = 200
+
+        return session_refreshed_response
+    else:
+        # report error but give the client a chance to try again later
+        refresh_failed_response = jsonify({'error': 'could not refresh token'})
+        session['session_id'] = session_id
+        refresh_failed_response.set_cookie('session_expires_in', session_expires_in)
+        # the status code will be whatever error the refresh_token failed with
+        refresh_failed_response.status_code = status_code
+        
+        return refresh_failed_response
 
 
 def revoke_reddit_token(login_session):
@@ -579,62 +597,56 @@ def logout():
     and sets the 'session_expires_in' cookie to present time
     (or unsets it if the session was invalid in the first place).
     """
-    if ('session_id' in session):
-        login_session, session_id = get_login_session()
-        if login_session:
-            if (not request_is_authorized(login_session, request)):
-                invalid_token_response = jsonify({'error': 'unauthorized request'})
-                invalid_token_response.status_code = 403
+    login_session, session_id = get_login_session()
+    if login_session:
+        if (not request_is_authorized(login_session, request)):
+            invalid_token_response = jsonify({'error': 'unauthorized request'})
+            invalid_token_response.status_code = 403
 
-                return invalid_token_response
+            return invalid_token_response
 
-            if (login_session.status == LoginSession.status_active):
-                revoke_status = revoke_reddit_token(login_session)
+        if (login_session.status == LoginSession.status_active):
+            revoke_status = revoke_reddit_token(login_session)
 
-                if (revoke_status != 204):
-                    revoke_failed_response = jsonify({'error': 'could not revoke token'})
-                    # indicate error and refresh session and session_expires_in cookies
-                    # so that client can attempt to properly logout later
-                    revoke_failed_response.status_code = revoke_status
-                    session['session_id'] = session_id
-                    session_expires_in = rwh.config['SESSION_DURATION']
-                    revoke_failed_response.set_cookie('session_expires_in', session_expires_in)
+            if (revoke_status != 204):
+                revoke_failed_response = jsonify({'error': 'could not revoke token'})
+                # indicate error and refresh session and session_expires_in cookies
+                # so that client can attempt to properly logout later
+                revoke_failed_response.status_code = revoke_status
+                session['session_id'] = session_id
+                session_expires_in = rwh.config['SESSION_DURATION']
+                revoke_failed_response.set_cookie('session_expires_in', session_expires_in)
 
-                    return revoke_failed_response
+                return revoke_failed_response
 
-                login_session.status = LoginSession.status_unlogged
-                db.session.add(login_session)
-                db.session.commit()
+            login_session.status = LoginSession.status_unlogged
+            db.session.add(login_session)
+            db.session.commit()
 
-                session_unlogged_response = jsonify({'session_id': session_id,
-                                                     'session_status': LoginSession.status_unlogged})
-                session_unlogged_response.status_code = 200
-                if ('session_id') in session:
-                    session.pop('session_id')
-                session_unlogged_response.set_cookie('session_expires_in', '-1', expires=0)
-
-                return session_unlogged_response
-            else:
-                session_invalid_response = jsonify({'session_id': session_id,
-                                                    'session_status': login_session.status})
-                session_invalid_response.status_code = 202
-                if ('session_id') in session:
-                    session.pop('session_id')
-                session_invalid_response.set_cookie('session_expires_in', '-1', expires=0)
-
-                return session_invalid_response
-        else:
-            session_not_found_response = jsonify({'session': session_id,
-                                                  'error': 'session not found'})
-            session_not_found_response.status_code = 404
+            session_unlogged_response = jsonify({'session_id': session_id,
+                                                 'session_status': LoginSession.status_unlogged})
+            session_unlogged_response.status_code = 200
             if ('session_id') in session:
                 session.pop('session_id')
-            session_not_found_response.set_cookie('session_expires_in', '-1', expires=0)
+            session_unlogged_response.set_cookie('session_expires_in', '-1', expires=0)
 
-            return session_not_found_response
+            return session_unlogged_response
+        else:
+            # this response is reason why this call cannot be simply @authorized
+            session_invalid_response = jsonify({'session_id': session_id,
+                                                'session_status': login_session.status})
+            session_invalid_response.status_code = 202
+            if ('session_id') in session:
+                session.pop('session_id')
+            session_invalid_response.set_cookie('session_expires_in', '-1', expires=0)
+
+            return session_invalid_response
     else:
-        missing_session_id_response = jsonify({'error': 'missing session_id'})
-        missing_session_id_response.status_code = 400
-        missing_session_id_response.set_cookie('session_expires_in', '-1', expires=0)
+        session_not_found_response = jsonify({'session': session_id,
+                                              'error': 'not logged in'})
+        session_not_found_response.status_code = 401
+        if ('session_id') in session:
+            session.pop('session_id')
+        session_not_found_response.set_cookie('session_expires_in', '-1', expires=0)
 
-        return missing_session_id_response
+        return session_not_found_response
