@@ -1,11 +1,11 @@
-import uuid
-import json
+from uuid import uuid4
+from json import loads as parse_json_string
 from datetime import timedelta
 from datetime import datetime
 from pytz import utc
 from urllib.parse import urlencode
 from urllib.request import Request as client_http_request
-from urllib.request import HTTPBasicAuthHandler as http_basic_auth_handler
+from urllib.request import HTTPBasicAuthHandler
 from urllib.request import build_opener, urlopen
 from hashlib import sha256
 from flask import Blueprint, request, session, make_response, render_template, flash, redirect, url_for, jsonify
@@ -15,6 +15,7 @@ from app import db, rwh
 from app.auth.models import LoginSession
 
 
+# unfortunately, datetime.datetime.utcnow() is timezone naive...
 def utcnow():
     return datetime.now(tz=utc)
 
@@ -53,6 +54,13 @@ def authenticated(call):
     (mind the order of decorators) can be accessed only by authenticated user.
     Non-authenticated users will be redirected to the /auth/login URL
     and the redirect_url cookie will be set for them to come back after login.
+
+    This decorator should only be used for routes that are accessed directly
+    by the user (e.g. by entering them to the browser address bar)
+    and the user can respond to the authentication request
+    after being redirected to the external login page.
+    It should not be used for paths that are part of the API
+    (see @authorized decorator for those).
     """
     def authenticated_call():
         login_session, session_id = get_login_session()
@@ -65,21 +73,121 @@ def authenticated(call):
     return authenticated_call
 
 
+def request_is_authorized(login_session, request):
+    """
+    Checks that the request contains the 'X-Session-Secret' header
+    and that the value matches with the current session ID.
+    This value is rendered as private javascript variable in the client.js
+    and should be sent by the client with every request.
+
+    Moreover, it checks that the 'Referer' header starts with the app URL.
+    This way only the calls made from one of the app pages can pass.
+
+    The arguments are the active login_session object and the (Flask) request.
+
+    It returns True if the referrer is allowed and CSRF token checks out,
+    False otherwise.
+
+    This function exists as separate call because it is used in multiple
+    places and the /auth/active and /auth/logout endpoints
+    has finer error reporting and perform additional cookie operations
+    than the clean @authorized decorator used for other calls.
+    """
+    referer_header = request.headers.get('Referer')
+
+    expected_token = login_session.secret
+    provided_token = request.headers.get('X-Session-Secret')
+
+    return ((expected_token == provided_token) and referer_header.startswith(rwh.config['APP_URL']))
+
+
+def authorized(call):
+    """
+    This is a decorator that should be used for paths that are API endpoints.
+
+    For example:
+        @profile_blueprint.path('/sshkey', ...)
+        @authorized
+        def sshkey():
+            ...
+
+    It will check for the presence of the 'X-Session-Secret' header
+    in the HTTP request and compare it to the current login session ID.
+    It also verifies that the 'Referer' header starts with the app URL
+    (the function request_is_authorized() is used internally).
+
+    If a valid login session cannot be determined status code 401
+    and JSON with error description 'not logged in' is returned.
+    If the header is missing or does not have the correct value,
+    the response status code will be 403 and the JSON with error description
+    'unauthorized request'.
+
+    If everything checks out, the decorated call will be executed.
+    """
+    def authorized_call():
+        login_session, session_id = get_login_session()
+
+        if (not login_session):
+            not_logged_in_response = jsonify({'error': 'not logged in'})
+            not_logged_in_response.status_code = 401
+
+            return not_logged_in_response
+
+        if (request_is_authorized(login_session, request)):
+            # this check is made here so that we can report proper error cause
+            # to a properly authenticated client with outdated session secret
+            # but not leak the session status via a malicious CSRF request
+            # i.e. only client from our app site that sent a proper CSRF token
+            # (but for session that is not valid any more) can get this error
+            # everyone else will get just the 403 "unauthorized request" bellow
+            if (login_session.status == LoginSession.status_active):
+                return call()
+            else:
+                invalid_session_response = jsonify({'error': 'invalid session'})
+                invalid_session_response.status_code = 401
+
+                return not_logged_in_response
+        else:
+            not_authorized_response = jsonify({'error': 'unauthorized request'})
+            not_authorized_response.status_code = 403
+
+            return not_authorized_response
+
+    return authorized_call
+
+
 @auth_blueprint.route('/client.js')
 def client_js():
     """
     Renders the client JS code that deals with Reddit API.
-    This is not static since it may contain parts that depend on the app config.
+    This code is not static since it contains session secrets
+    and values that depend on the app configuration.
+
+    This endponint will only respond when the user is logged in
+    (has active session cookie) and the request comes from a URL
+    that starts with the app URL (value of the 'Referer' header is checked).
+
+    The difference from the @authorized decorator is that these security checks
+    do not look at the value of the 'X-Session-Secret' which is only known after
+    the client downloads this JS code (included as a private variable within).
     """
     login_session, session_id = get_login_session()
+    if (not login_session):
+        not_logged_in_response = jsonify({'error': 'not logged in'})
+        not_logged_in_response.status_code = 401
 
-    user_agent_string = rwh.config['APP_USER_AGENT_CLIENT']
-    app_url_string    = rwh.config['APP_URL']
-    
+        return not_logged_in_response
+
+    if ((not request.headers.get('Referer').startswith(rwh.config['APP_URL'])) or (login_session.status != LoginSession.status_active)):
+        not_authorized_response = jsonify({'error': 'unauthorized request'})
+        not_authorized_response.status_code = 403
+
+        return not_authorized_response
+
     return render_template('auth/client.js',
-                           session    = session_id,
-                           user_agent = user_agent_string,
-                           app_url    = app_url_string)
+                           session_secret = login_session.secret,
+                           user_agent     = rwh.config['APP_USER_AGENT_CLIENT'],
+                           app_url        = rwh.config['APP_URL'])
 
 
 def token_request(uri, post_data):
@@ -97,7 +205,7 @@ def token_request(uri, post_data):
     token_request.add_header('Content-Type', 'application/x-www-form-urlencoded')
     token_request.add_header('User-Agent', rwh.config['APP_USER_AGENT_SERVER'])
 
-    authenticator = http_basic_auth_handler()
+    authenticator = HTTPBasicAuthHandler()
     authenticator.add_password(realm='reddit', uri=uri,
                                user=rwh.config['APP_ID'], passwd='')
     authenticated_opener = build_opener(authenticator)
@@ -109,7 +217,7 @@ def token_request(uri, post_data):
     if request_result:
         result_body = request_result.read().decode('utf-8')
     if result_body and (len(result_body.strip()) > 0):
-        result_data = json.loads(result_body)
+        result_data = parse_json_string(result_body)
     else:
         result_data = None
 
@@ -119,10 +227,10 @@ def token_request(uri, post_data):
 def obtain_token(login_session, authorization_code):
     """
     Calls OAuth2 server to get the API bearer token and refresh token
-    using the one-time code previously sent to the /auth/reddit_login endpoint
+    using the one-time code previously sent to the /auth/login endpoint
     after the first stage of authorization (user approval and redirect).
 
-    This call is used by the /auth/reddit_login endpoint.
+    This function is used by the reddit_login() call.
     """
     authorization_uri  = 'https://www.reddit.com/api/v1/access_token'
     authorization_post_data = {
@@ -160,7 +268,7 @@ def get_reddit_username(login_session):
     http_status = response.getcode()
     response_body = response.read().decode('utf-8')
     if ((http_status == 200) and (len(response_body.strip()) > 0)):
-        response_data = json.loads(response_body)
+        response_data = parse_json_string(response_body)
 
         username = response_data['name'] 
 
@@ -170,6 +278,7 @@ def get_reddit_username(login_session):
         return hash_function.hexdigest()
     else:
         return None
+
 
 @auth_blueprint.route('/login', strict_slashes=False)
 def reddit_login():
@@ -321,7 +430,7 @@ def reddit_login():
     else:
         # No session_id cookie was found.
         # Create new login session.
-        session_id = str(uuid.uuid4())
+        session_id = str(uuid4())
         login_session = LoginSession(session_id) # default status='initiating'
         db.session.add(login_session)
         db.session.commit()
@@ -365,54 +474,35 @@ def refresh_token(login_session):
     return status_code
 
 
-def verify_request(login_session, request):
-    """
-    Checks that the request contains the 'X-Csrf-Token' header
-    and that the value matches with the current session ID.
-    This value is rendered as private javascript variable in the client.js
-    and should be sent by the client with every request
-    to /auth/active and /auth/logout.
-
-    Moreover, it checks that the 'Referer' header starts with the app URL.
-    This way only an AuthClient instance defined in client.js file
-    which was included from one of the app pages can properly make requests
-    to the /auth/active or /auth/logout endpoints from the user's browser.
-
-    The arguments are the active login_session object and the (Flask) request.
-
-    It returns True if the referrer is allowed and CSRF token checks out,
-    False otherwise.
-    """
-    referer_header = request.headers.get('Referer')
-
-    expected_token = login_session.id
-    provided_token = request.headers.get('X-Csrf-Token')
-
-    return ((expected_token == provided_token) and referer_header.startswith(rwh.config['APP_URL']))
-
-
 @auth_blueprint.route('/active', strict_slashes=False)
 def active():
     """
     This is API only endpoint that should be called regulary (e.g. with AJAX)
     by any @authenticated page that wishes to maintain the login session.
-    It returns JSON object with the session ID and token expiration timestamp.
-    A client that wishes to make posts to Reddit API after the indicated time
-    should call this endpoint first. When client calls this endpoint after
-    the token expires, the app attempts to re-activate the bearer token
-    and returns the new token expiration time and status of the operation.
-    This way the client can know that the app has the required permissions
-    to make calls to the Reddit API.
+    It returns JSON object with the session secret, status, (reddit) API token
+    expiration times in seconds for the session and the token.
+
+    A client that wishes to make request to the Reddit API after the time
+    of the token expiration should call this endpoint first.
+    When this endpoint is accessed after the token expired,
+    the server will attempt to re-activate the token (using refresh token)
+    and returns the new token and its expiration time and the session info.
 
     Beside of that, a cookie 'session_expires_in' is set, which indicates
     how long will the app respond to this call. After the time
-        now + SESSION_DURATION
-    the app will revoke its access and client must log and authorize app again.
+        now + session_expires_in
+    the app will revoke its access and mark the session as expired.
+    A client that wishes to get new token and continue making API requests
+    will have to log in again and re-authorize the app.
+
+    If the request is not successfull, the relevant cookies will be unset
+    so that the client doesn't make the same errornous request again.
     """
     login_session, session_id = get_login_session()
+
     if login_session and (login_session.status == LoginSession.status_active):
-        if (not verify_request(login_session, request)):
-            invalid_token_response = jsonify({'error': 'request not authorized'})
+        if (not request_is_authorized(login_session, request)):
+            invalid_token_response = jsonify({'error': 'unauthorized request'})
             invalid_token_response.status_code = 403
 
             return invalid_token_response
@@ -432,7 +522,7 @@ def active():
 
         if (status_code == 200):
             token_expires_in = int(login_session.token_expires.strftime('%s')) - int(utcnow().strftime('%s')) 
-            session_refreshed_response = jsonify({'session_id': session_id,
+            session_refreshed_response = jsonify({'session_secret': login_session.secret,
                                                   'session_status': LoginSession.status_active,
                                                   'token': login_session.token,
                                                   'token_expires_in': token_expires_in})
@@ -449,7 +539,7 @@ def active():
             
             return refresh_failed_response
     else:
-        unauthenticated_response = jsonify({'error': 'user not logged in'})
+        unauthenticated_response = jsonify({'error': 'not logged in'})
         if ('session_id') in session:
             session.pop('session_id')
         unauthenticated_response.set_cookie('session_expires_in', '-1', expires=0)
@@ -492,14 +582,15 @@ def logout():
     if ('session_id' in session):
         login_session, session_id = get_login_session()
         if login_session:
+            if (not request_is_authorized(login_session, request)):
+                invalid_token_response = jsonify({'error': 'unauthorized request'})
+                invalid_token_response.status_code = 403
+
+                return invalid_token_response
+
             if (login_session.status == LoginSession.status_active):
-                if (not verify_request(login_session, request)):
-                    invalid_token_response = jsonify({'error': 'request not authorized'})
-                    invalid_token_response.status_code = 403
-
-                    return invalid_token_response
-
                 revoke_status = revoke_reddit_token(login_session)
+
                 if (revoke_status != 204):
                     revoke_failed_response = jsonify({'error': 'could not revoke token'})
                     # indicate error and refresh session and session_expires_in cookies

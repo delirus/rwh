@@ -1,3 +1,4 @@
+from uuid import uuid4
 from app import db
 
 class LoginSession(db.Model):
@@ -8,6 +9,7 @@ class LoginSession(db.Model):
     status_expired    = 'expired'
 
     id            = db.Column(db.String(36),              primary_key=True)
+    secret        = db.Column(db.String(36),              default=None)
     status        = db.Column(db.String(10),              default=None)
     username      = db.Column(db.String(65),              default=None)
     token         = db.Column(db.String(36),              default=None)
@@ -19,6 +21,7 @@ class LoginSession(db.Model):
 
     def __init__(self, session_id):
         self.id     = session_id
+        self.secret = str(uuid4())
         self.status = self.status_initiating
     
     def __repr__(self):

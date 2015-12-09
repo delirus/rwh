@@ -5,7 +5,7 @@ function AuthClient() {
   // to authorize requests to <app_url>/auth/active and <app_url>/auth/logout
   // it set by server while sending the client source and
   // it never should be modified by any JS code
-  var sessionId = "{{ session }}";
+  var sessionSecret = "{{ session_secret }}";
 
   var sessionStatus = 'uninitialized';
   this.isReady = function() {
@@ -59,7 +59,7 @@ function AuthClient() {
           token = jsonResponse.token;
           tokenExpiration = Date.now() + 1000*parseInt(jsonResponse.token_expires_in);
 
-          sessionId = jsonResponse.session_id;
+          sessionSecret = jsonResponse.session_secret;
           // cookies were refreshed in this very request
           // so the value of the "session_expires_in" cookie is now valid
           sessionExpiration = Date.now() + 1000*parseInt(getCookie('session_expires_in'));
@@ -86,7 +86,7 @@ function AuthClient() {
       }
     };
     sessionStatusRequest.open("GET", "{{ app_url }}/auth/active", true);
-    sessionStatusRequest.setRequestHeader('X-Csrf-Token', sessionId);
+    sessionStatusRequest.setRequestHeader('X-Session-Secret', sessionSecret);
     sessionStatusRequest.send();
   }
 
@@ -110,9 +110,9 @@ function AuthClient() {
         }
       }
     };
-    sessionStatusRequest.open("GET", "{{ app_url }}/auth/logout", true);
-    sessionStatusRequest.setRequestHeader('X-Csrf-Token', sessionId);
-    sessionStatusRequest.send();
+    logoutRequest.open("GET", "{{ app_url }}/auth/logout", true);
+    logoutRequest.setRequestHeader('X-Session-Secret', sessionSecret);
+    logoutRequest.send();
   }
   
   // creates an object that registers a new callback function

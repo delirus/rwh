@@ -9,7 +9,7 @@ export DB_NAME="db_name"
 export DB_USER="db_user"
 export DB_PASS="db_password"
 
-export DBGC_PID="scheduler.pid" # PID file for controlling background processes
+export SCHEDULER_PID="scheduler.pid" # PID file for controlling background processes
 
 export SESSION_KEY="secret_key_1"
 export COOKIES_KEY="secret_key_2"

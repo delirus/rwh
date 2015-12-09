@@ -20,7 +20,9 @@ class Config(object):
     SQLALCHEMY_DATABASE_URI = "postgresql://%s:%s@%s/%s" % (db_user, db_pass,
                                                             db_host, db_name)
 
-    DBGC_PID = os.environ['DBGC_PID']
+    SCHEDULER_PID = os.environ['SCHEDULER_PID']
+
+    RWH_DATA = os.environ['RWH_DATA']
 
 class Production(Config):
     DEBUG       = False

@@ -36,7 +36,7 @@ def start_periodic_cleanup(db, main_process_pid=-1, master=False, scheduler_proc
     that are inactive longer than the SESSION_DURATION interval.
     The background process starts another child background process
     to actually run the DB cleanup and then waits for the cleanup interval
-    (SESSION_DURATION / 2 + 1 seconds by default) before running it again.
+    (by default (SESSION_DURATION // 10) + 1 seconds) before running it again.
 
     The background process that is starting the cleanup task (scheduler)
     writes the parent process PID into a file (set in the app configuration)
@@ -61,7 +61,7 @@ def start_periodic_cleanup(db, main_process_pid=-1, master=False, scheduler_proc
     The only argument that needs to be given is the Flask-SQLAlchemy DB
     that will be passed to the expire_old_sessions() (periodically called task).
     """
-    gc_pidfile = rwh.config['DBGC_PID']
+    gc_pidfile = rwh.config['SCHEDULER_PID']
     is_master = master
 
     def write_pidfile(filename, pid):
@@ -100,7 +100,7 @@ def start_periodic_cleanup(db, main_process_pid=-1, master=False, scheduler_proc
         return is_master
     else:
         if (interval == -1):
-            cleanup_interval = (int(rwh.config['SESSION_DURATION']) / 10) + 1
+            cleanup_interval = (int(rwh.config['SESSION_DURATION']) // 10) + 1
         else:
             cleanup_interval = interval
 
