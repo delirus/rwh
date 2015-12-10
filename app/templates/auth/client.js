@@ -6,6 +6,9 @@ function AuthClient() {
   // it set by server while sending the client source and
   // it never should be modified by any JS code
   var sessionSecret = "{{ session_secret }}";
+  var getSessionSecret = function() {
+    return sessionSecret;
+  }
 
   var sessionStatus = 'uninitialized';
   this.getSessionStatus = function() {
@@ -81,7 +84,7 @@ function AuthClient() {
         }
         else {
           throw { 'code': sessionStatusRequest.status,
-                  'message': 'server error' };
+                  'error': 'server error' };
         }
       }
     };
@@ -110,7 +113,7 @@ function AuthClient() {
         }
         else {
           throw { 'code': logoutRequest.status,
-                  'message': 'server error' };
+                  'error': 'server error' };
         }
       }
     };
@@ -122,28 +125,33 @@ function AuthClient() {
   // creates an object that registers a new callback function
   // that will be called after an API query called on this object finishes
   //
-  // intended use is this:
+  // intended use can look for example like this:
   //     processQueryResult = new authClientInstance.RequestResultHandler(myResultProcessingFunction)
-  //     processQueryResult.after('GET', '/api/v1/me')
-  // (see this.call() function for shorter syntax and
-  //  RequestResultHandler.after function for its parameters)
+  //     processQueryResult.afterRedditRequest('GET', '/api/v1/me')
+  // (see AuthClient.call() function for shorter syntax)
   //
   // the only parameter to the constructor is the callback function
   // which will be called when the results of the API requests
   // originated from this instance are ready
   this.RequestResultHandler = function(resultProcessor) {
+    var _handler = this;
+
     var handlerResultProcessor = null;
     if (typeof resultProcessor !== 'undefined')
       handlerResultProcessor = resultProcessor;
     else
-      throw { 'code': null, 'message': 'missing result processor argument' };
+      throw { 'code': null, 'error': 'missing result processor argument' };
     
     var sessionStatus = _client.getSessionStatus;
     var refreshClient = _client.refresh;
 
     var clientWaitingRequests   = waitingRequests;
 
-    var clientToken             = getToken;
+    var clientSessionSecret     = getSessionSecret;
+
+    var clientToken             = function() {
+      return 'bearer '+getToken();
+    }
     var clientTokenExpiration   = getTokenExpiration;
     var clientSessionExpiration = getSessionExpiration;
 
@@ -155,35 +163,64 @@ function AuthClient() {
     // it is up to the resultProcessor function (see RequestResultHandler init)
     // to check the returned status and either prcess data or handle an error
     // 
-    // the compulsory parameters are the HTTP method string (e.g. "GET"),
-    // the Reddit API path (e.g. "/api/v1/me") and the requestData argument
-    // which may be omitted if there are no data to be sent in the request body
-    // (most likely with "POST" or "PUT" HTTP method)
-    // the requestData is assumed to be either string,
-    // in which case it will be posted as-is,
-    // or an object, in which case it must be JSON that will be stringified
-    this.after = function(httpMethod, apiPath, requestData) {
+    // the parameters are following:
+    // HTTP method string (e.g. "GET"),
+    // API base URL (e.g. 'https://oauth.reddit.com'),
+    // the API path (e.g. "/api/v1/me"),
+    // the requestData,
+    // authorization HTTP header name (e.g. 'Authorization') and
+    // call to get the authorization header value (e.g. clientToken function)
+    //
+    // the requestData argument may be omitted or given as null
+    // if no data are supposed to be sent in the request body,
+    // otherwise it is assumed to be either string, which is posted as-is,
+    // or a JSON object, which will be jsonified to a string
+    //
+    // authorization HTTP header name and the authorization header value call
+    // can be omitted, in which case they are not sent with the request
+    // if the authorization header name is given, it is expected to be a string
+    // and the authorization header value is expected to be name of a function
+    // which returns the value of the header to authorize the API request
+    this.callProcessorAfterRequest = function(httpMethod, apiUrl, apiPath, requestData, authHeader, getAuthTokenCall) {
       var requestResultProcessor = handlerResultProcessor;
 
       var givenHttpMethod = null;
       if (typeof httpMethod !== 'undefined')
         givenHttpMethod = httpMethod;
       else
-        throw { 'code': null, 'message': 'missing method argument' };
+        throw { 'code': null, 'error': 'missing HTTP method argument' };
+
+      var givenApiUrl = null;
+      if (typeof apiUrl !== 'undefined')
+        givenApiUrl = apiUrl;
+      else
+        throw { 'code': null, 'error': 'missing API base URL argument' };
 
       var givenApiPath = null;
       if (typeof apiPath !== 'undefined')
         givenApiPath = apiPath;
       else
-        throw { 'code': null, 'message': 'missing path argument' };
+        throw { 'code': null, 'error': 'missing API path argument' };
 
       givenRequestData = (typeof requestData !== 'undefined') ? requestData : null;
+
+      var givenAuthHeader = null;
+      if (typeof authHeader !== 'undefined')
+        givenAuthHeader = authHeader;
+      else
+        throw { 'code': null, 'error': 'missing auhotization header argument' };
+
+      var givenAuthTokenCall = null;
+      if (typeof getAuthTokenCall !== 'undefined')
+        givenAuthTokenCall = getAuthTokenCall;
+      else
+        throw { 'code': null, 'error': 'missing authorization token argument' };
 
       var time_now = Date.now();
 
       if (sessionStatus() === 'active') {
         if (time_now > clientSessionExpiration())
-          throw { 'code': null, 'message': 'login session expired' };
+          throw { 'code': null, 'error': 'login session expired' };
 
         if (time_now > clientTokenExpiration())
           refreshClient();
@@ -196,7 +233,7 @@ function AuthClient() {
         }
       }
       apiRequest.open(givenHttpMethod,
-                      'https://oauth.reddit.com'+givenApiPath,
+                      givenApiUrl+givenApiPath,
                       true);
       // this header is no longer forbidden per-spec
       // so it should work in the newest browser versions...
@@ -214,13 +251,15 @@ function AuthClient() {
         apiRequest.apiRequestData = stringData;
         apiRequest.setRequestHeader('Content-Length', stringData.length);
         apiRequest.sendWithData = function() {
-          apiRequest.setRequestHeader('Authorization', 'bearer '+clientToken());
+          if (givenAuthHeader)
+            apiRequest.setRequestHeader(givenAuthHeader, givenAuthTokenCall());
           apiRequest.send(apiRequestData);
         }
       }
       else {
         apiRequest.sendWithData = function() {
-          apiRequest.setRequestHeader('Authorization', 'bearer '+clientToken());
+          if (givenAuthHeader)
+            apiRequest.setRequestHeader(givenAuthHeader, givenAuthTokenCall());
           apiRequest.send();
         }
       }
@@ -232,6 +271,20 @@ function AuthClient() {
         clientWaitingRequests.push(apiRequest);
       else
         throw {'code': null, 'error': 'inactive login session'}
+    }
+
+    this.afterRedditRequest = function(httpMethod, redditApiPath, requestData) {
+      if (typeof requestData !== 'undefined')
+        _handler.callProcessorAfterRequest(httpMethod, 'https://oauth.reddit.com', redditApiPath, requestData, 'Authorization', clientToken);
+      else
+        _handler.callProcessorAfterRequest(httpMethod, 'https://oauth.reddit.com', redditApiPath, null, 'Authorization', clientToken);
+    }
+
+    this.afterRwhRequest = function(httpMethod, rwhApiPath, requestData) {
+      if (typeof requestData !== 'undefined')
+        _handler.callProcessorAfterRequest(httpMethod, '{{ app_url }}', rwhApiPath, requestData, 'X-Session-Secret', clientSessionSecret);
+      else
+        _handler.callProcessorAfterRequest(httpMethod, '{{ app_url }}', rwhApiPath, null, 'X-Session-Secret', clientSessionSecret);
     }
   }
 

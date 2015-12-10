@@ -8,14 +8,11 @@
     <script src="{{ ASSET_URL }}"></script>
   {% endassets %} 
 </head>
-<body>
+<body onload="loadValues()">
 
-<h2>Profile</h2>
+<h2 id="username"></h2>
 
-<button type="button" onclick="loadUsername()">Update username</button>
-
-<p id="username"></p>
-
+<samp id="pubkey"></samp>
 
 <script src="/auth/client.js"></script>
 
@@ -27,13 +24,30 @@ function setUsernameValue(requestResult) {
   }
   else {
     errorMessage = "API request returned error "+requestResult.status;
-    showError({'message': errorMessage});
+    showError({'error': errorMessage});
   }
 }
 
-function loadUsername() {
+function setPublicKeyValue(requestResult) {
+  if (requestResult.status == 200) {
+    publicKey = requestResult.responseText;
+    document.getElementById("pubkey").innerHTML = publicKey;
+  }
+  else {
+    errorMessage = "API request returned error "+requestResult.status;
+    showError({'error': errorMessage});
+  }
+}
+
+function loadValues() {
   try {
-    authClient.call(setUsernameValue).after('GET', '/api/v1/me');
+    authClient.call(setUsernameValue).afterRedditRequest('GET', '/api/v1/me');
+  }
+  catch (error) {
+    showError(error);
+  }
+  try {
+    authClient.call(setPublicKeyValue).afterRwhRequest('GET', '/profile/sshkey');
   }
   catch (error) {
     showError(error);
