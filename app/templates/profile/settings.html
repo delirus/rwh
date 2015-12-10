@@ -12,7 +12,12 @@
 
 <h2 id="username"></h2>
 
+<h3>Your SSH public key:</h3>
 <samp id="pubkey"></samp>
+
+<h3>Your git repo:</h3>
+<input type="text" id="giturl">
+<input type="submit" value="Set" onclick="authClient.call(setGitRepoUrlValue).afterRwhRequest('POST', '/profile/giturl', document.getElementById('giturl').value);">
 
 <script src="/auth/client.js"></script>
 
@@ -39,6 +44,17 @@ function setPublicKeyValue(requestResult) {
   }
 }
 
+function setGitRepoUrlValue(requestResult) {
+  if (requestResult.status == 200) {
+    gitRepoUrl = requestResult.responseText;
+    document.getElementById("giturl").innerHTML = gitRepoUrl;
+  }
+  else {
+    errorMessage = "API request returned error "+requestResult.status;
+    showError({'error': errorMessage});
+  }
+}
+
 function loadValues() {
   try {
     authClient.call(setUsernameValue).afterRedditRequest('GET', '/api/v1/me');
@@ -46,8 +62,16 @@ function loadValues() {
   catch (error) {
     showError(error);
   }
+
   try {
     authClient.call(setPublicKeyValue).afterRwhRequest('GET', '/profile/sshkey');
+  }
+  catch (error) {
+    showError(error);
+  }
+
+  try {
+    authClient.call(setGitRepoUrlValue).afterRwhRequest('GET', '/profile/giturl');
   }
   catch (error) {
     showError(error);

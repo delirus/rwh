@@ -9,6 +9,7 @@ from urllib.request import HTTPBasicAuthHandler
 from urllib.request import build_opener, urlopen
 from hashlib import sha256
 from flask import Blueprint, request, session, make_response, render_template, flash, redirect, url_for, jsonify
+from functools import wraps
 
 from app import db, rwh
 
@@ -62,6 +63,7 @@ def authenticated(call):
     It should not be used for paths that are part of the API
     (see @authorized decorator for those).
     """
+    @wraps(call)
     def authenticated_call():
         login_session, session_id = get_login_session()
         if login_session and (login_session.status == LoginSession.status_active):
@@ -128,6 +130,7 @@ def authorized(call):
 
     If everything checks out, the decorated call will be executed.
     """
+    @wraps(call)
     def authorized_call():
         login_session, session_id = get_login_session()
 

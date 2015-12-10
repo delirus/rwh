@@ -246,6 +246,8 @@ function AuthClient() {
           stringData = JSON.stringify(requestData);
         }
         else {
+          apiRequest.setRequestHeader('Content-Type',
+                                      'text/html; charset=utf-8');
           stringData = requestData.toString();
         }
         apiRequest.apiRequestData = stringData;
@@ -253,7 +255,7 @@ function AuthClient() {
         apiRequest.sendWithData = function() {
           if (givenAuthHeader)
             apiRequest.setRequestHeader(givenAuthHeader, givenAuthTokenCall());
-          apiRequest.send(apiRequestData);
+          apiRequest.send(apiRequest.apiRequestData);
         }
       }
       else {
